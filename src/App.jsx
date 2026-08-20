@@ -8,7 +8,7 @@ import {
   Download, Upload, Home as HomeIcon, CheckSquare, Calendar as CalendarIcon,
   Cloud, CloudOff, Loader2, Pencil, Flag, StickyNote, LogOut
 } from "lucide-react";
-import { login, logout, watchAuth, checkRedirectResult, loadCloudData, saveCloudData } from "./firebase";
+import { login, logout, watchAuth, checkRedirectResult, signUpWithEmail, signInWithEmail, loadCloudData, saveCloudData } from "./firebase";
 
 const STORAGE_KEY = "timelogger-data-v1";
 const COLORS = ["#FF7A1A", "#8B5FBF", "#E8637A", "#3FA66B", "#3B82C4", "#6B7280", "#F0B429", "#1AA6A6"];
@@ -179,6 +179,10 @@ export default function App() {
   const [user, setUser] = useState(undefined); // undefined = still checking, null = logged out
   const [syncing, setSyncing] = useState(false);
   const [skippedLogin, setSkippedLogin] = useState(false);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPass, setAuthPass] = useState("");
+  const [authMode, setAuthMode] = useState("signin"); // "signin" | "signup"
+  const [authError, setAuthError] = useState("");
 
   const [addLogOpen, setAddLogOpen] = useState(false);
   const [newLogName, setNewLogName] = useState("");
@@ -389,12 +393,41 @@ export default function App() {
   }
 
   if (user === null && !skippedLogin) {
+    async function handleEmailAuth(e) {
+      e.preventDefault();
+      setAuthError("");
+      try {
+        if (authMode === "signup") await signUpWithEmail(authEmail, authPass);
+        else await signInWithEmail(authEmail, authPass);
+      } catch (err) {
+        setAuthError(err.message.replace("Firebase: ", ""));
+      }
+    }
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-neutral-950 text-gray-100 px-6 text-center">
         <Cloud size={40} className="text-orange-400" />
         <h1 className="text-lg font-semibold">Sign in to sync across devices</h1>
-        <p className="text-sm text-gray-400 max-w-xs">Logging works offline either way. Signing in with Google lets this device's data follow you to your other devices.</p>
-        <button onClick={() => login().catch(() => {})} className="px-4 py-2 rounded-lg bg-white text-neutral-900 font-medium text-sm">Sign in with Google</button>
+        <p className="text-sm text-gray-400 max-w-xs">Logging works offline either way. Signing in lets this device's data follow you to your other devices.</p>
+
+        <form onSubmit={handleEmailAuth} className="w-full max-w-xs flex flex-col gap-2 mt-2">
+          <input type="email" required placeholder="Email" value={authEmail} onChange={e => setAuthEmail(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 text-sm text-gray-100 placeholder:text-gray-500" />
+          <input type="password" required placeholder="Password" value={authPass} onChange={e => setAuthPass(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 text-sm text-gray-100 placeholder:text-gray-500" />
+          {authError && <div className="text-xs text-red-400 text-left">{authError}</div>}
+          <button type="submit" className="px-4 py-2 rounded-lg bg-orange-500 text-white font-medium text-sm">
+            {authMode === "signup" ? "Create account" : "Sign in"}
+          </button>
+        </form>
+        <button onClick={() => { setAuthMode(m => m === "signup" ? "signin" : "signup"); setAuthError(""); }} className="text-xs text-gray-400 underline">
+          {authMode === "signup" ? "Already have an account? Sign in" : "New here? Create an account"}
+        </button>
+
+        <div className="flex items-center gap-2 w-full max-w-xs my-1">
+          <div className="flex-1 h-px bg-neutral-800" /><span className="text-[11px] text-gray-500">or</span><div className="flex-1 h-px bg-neutral-800" />
+        </div>
+        <button onClick={() => login().catch(() => {})} className="px-4 py-2 rounded-lg bg-white text-neutral-900 font-medium text-sm w-full max-w-xs">Sign in with Google</button>
+        <p className="text-[11px] text-gray-500 max-w-xs">Google sign-in can be unreliable inside an installed Home Screen app on iPhone — email is more reliable here.</p>
         <button onClick={() => setSkippedLogin(true)} className="text-xs text-gray-500 underline">Skip, use this device only</button>
       </div>
     );

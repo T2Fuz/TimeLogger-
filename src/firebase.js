@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import {
   getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword,
 } from "firebase/auth";
 import {
   initializeFirestore, getFirestore, doc, getDoc, setDoc, persistentLocalCache,
@@ -39,6 +40,14 @@ export function login() {
 }
 export function checkRedirectResult() {
   return getRedirectResult(auth); // call once on app start to finish a sign-in after redirect
+}
+// Reliable inside an installed iOS Home Screen app: no redirect to another
+// domain, so nothing gets lost between Safari's storage and the app's storage.
+export function signUpWithEmail(email, password) {
+  return createUserWithEmailAndPassword(auth, email, password);
+}
+export function signInWithEmail(email, password) {
+  return signInWithEmailAndPassword(auth, email, password);
 }
 export function logout() {
   return signOut(auth);
