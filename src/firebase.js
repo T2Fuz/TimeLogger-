@@ -1,9 +1,9 @@
 import { initializeApp } from "firebase/app";
 import {
-  getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut,
+  getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut,
 } from "firebase/auth";
 import {
-  initializeFirestore, doc, getDoc, setDoc, persistentLocalCache,
+  initializeFirestore, getFirestore, doc, getDoc, setDoc, persistentLocalCache,
 } from "firebase/firestore";
 
 // Your Firebase project's keys (from Project settings > Your apps)
@@ -24,12 +24,21 @@ export const googleProvider = new GoogleAuthProvider();
 // persistentLocalCache = the "offline" magic: writes go to a local cache
 // first (works with zero internet) and Firestore syncs them to the cloud
 // automatically whenever a connection is available.
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({}),
-});
+// Some browser contexts (private tabs, restricted storage) can reject this —
+// fall back to a normal (memory-only) Firestore instance instead of crashing.
+export let db;
+try {
+  db = initializeFirestore(app, { localCache: persistentLocalCache({}) });
+} catch (e) {
+  console.error("Offline cache unavailable, falling back:", e);
+  db = getFirestore(app);
+}
 
 export function login() {
-  return signInWithPopup(auth, googleProvider);
+  return signInWithRedirect(auth, googleProvider);
+}
+export function checkRedirectResult() {
+  return getRedirectResult(auth); // call once on app start to finish a sign-in after redirect
 }
 export function logout() {
   return signOut(auth);

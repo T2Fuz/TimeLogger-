@@ -8,7 +8,7 @@ import {
   Download, Upload, Home as HomeIcon, CheckSquare, Calendar as CalendarIcon,
   Cloud, CloudOff, Loader2, Pencil, Flag, StickyNote, LogOut
 } from "lucide-react";
-import { login, logout, watchAuth, loadCloudData, saveCloudData } from "./firebase";
+import { login, logout, watchAuth, checkRedirectResult, loadCloudData, saveCloudData } from "./firebase";
 
 const STORAGE_KEY = "timelogger-data-v1";
 const COLORS = ["#FF7A1A", "#8B5FBF", "#E8637A", "#3FA66B", "#3B82C4", "#6B7280", "#F0B429", "#1AA6A6"];
@@ -200,7 +200,10 @@ export default function App() {
   const [subLogName, setSubLogName] = useState("");
 
   // ---------- auth ----------
-  useEffect(() => watchAuth(setUser), []);
+  useEffect(() => {
+    checkRedirectResult().catch((e) => console.error("Redirect sign-in failed:", e));
+    return watchAuth(setUser);
+  }, []);
 
   // ---------- load ----------
   // Always read from the local copy first (works fully offline, instant).
