@@ -1,13 +1,12 @@
 import { initializeApp } from "firebase/app";
 import {
-  getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut,
+  getAuth, onAuthStateChanged, signOut,
   createUserWithEmailAndPassword, signInWithEmailAndPassword,
 } from "firebase/auth";
 import {
   initializeFirestore, getFirestore, doc, getDoc, setDoc, persistentLocalCache,
 } from "firebase/firestore";
 
-// Your Firebase project's keys (from Project settings > Your apps)
 const firebaseConfig = {
   apiKey: "AIzaSyAdMBUoq21Jkrt4Vq-h9nNVimSGOyftx7Q",
   authDomain: "time-logger-d7e5a.firebaseapp.com",
@@ -20,13 +19,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
 
-// persistentLocalCache = the "offline" magic: writes go to a local cache
-// first (works with zero internet) and Firestore syncs them to the cloud
-// automatically whenever a connection is available.
-// Some browser contexts (private tabs, restricted storage) can reject this —
-// fall back to a normal (memory-only) Firestore instance instead of crashing.
 export let db;
 try {
   db = initializeFirestore(app, { localCache: persistentLocalCache({}) });
@@ -35,19 +28,16 @@ try {
   db = getFirestore(app);
 }
 
-export function login() {
-  return signInWithRedirect(auth, googleProvider);
+function usernameToEmail(username) {
+  const clean = username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "");
+  return `${clean}@timelogger.local`;
 }
-export function checkRedirectResult() {
-  return getRedirectResult(auth); // call once on app start to finish a sign-in after redirect
+
+export function signUpWithUsername(username, password) {
+  return createUserWithEmailAndPassword(auth, usernameToEmail(username), password);
 }
-// Reliable inside an installed iOS Home Screen app: no redirect to another
-// domain, so nothing gets lost between Safari's storage and the app's storage.
-export function signUpWithEmail(email, password) {
-  return createUserWithEmailAndPassword(auth, email, password);
-}
-export function signInWithEmail(email, password) {
-  return signInWithEmailAndPassword(auth, email, password);
+export function signInWithUsername(username, password) {
+  return signInWithEmailAndPassword(auth, usernameToEmail(username), password);
 }
 export function logout() {
   return signOut(auth);
@@ -56,7 +46,6 @@ export function watchAuth(cb) {
   return onAuthStateChanged(auth, cb);
 }
 
-// One document per user holds the whole app's data (logs, sessions, todos...).
 export async function loadCloudData(uid) {
   const ref = doc(db, "users", uid);
   const snap = await getDoc(ref);
