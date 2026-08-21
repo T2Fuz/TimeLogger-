@@ -464,7 +464,7 @@ export default function App() {
           subLogOpen={subLogOpen} setSubLogOpen={setSubLogOpen}
           subLogParentId={subLogParentId} setSubLogParentId={setSubLogParentId}
           subLogName={subLogName} setSubLogName={setSubLogName}
-          isOnline={isOnline}
+          isOnline={isOnline} user={user} syncing={syncing}
           onExport={handleExport} onImport={handleImport}
           now={now}
         />
@@ -590,7 +590,7 @@ function HomeScreen(props) {
     logMenuId, setLogMenuId, renameId, setRenameId, renameVal, setRenameVal, renameLog, deleteLog, moveLog,
     colorPickerId, setColorPickerId, setLogColor,
     expandedId, setExpandedId, subLogOpen, setSubLogOpen, subLogParentId, setSubLogParentId, subLogName, setSubLogName,
-    isOnline, onExport, onImport,
+    isOnline, user, syncing, onExport, onImport,
     manualOpen, setManualOpen, manualLogId, setManualLogId, manualDate, setManualDate,
     manualMode, setManualMode, manualStart, setManualStart, manualEnd, setManualEnd,
     manualH, setManualH, manualM, setManualM, addManualSession,
