@@ -22,21 +22,7 @@ export default defineConfig({
       },
       workbox: {
         // Cache the app shell so it opens instantly with zero connection.
-        globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
-        // Always try the network first for the HTML shell so a fixed deploy
-        // is picked up immediately instead of an old cached index.html
-        // (which would point at an old, possibly-broken JS bundle) sticking
-        // around on an installed iPhone Home Screen app.
-        runtimeCaching: [
-          {
-            urlPattern: ({ request }) => request.mode === "navigate",
-            handler: "NetworkFirst",
-            options: { cacheName: "html-shell", networkTimeoutSeconds: 3 }
-          }
-        ],
-        cleanupOutdatedCaches: true,
-        clientsClaim: true,
-        skipWaiting: true
+        globPatterns: ["**/*.{js,css,html,ico,png,svg}"]
       }
     })
   ]
