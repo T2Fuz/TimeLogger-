@@ -8,7 +8,7 @@ import {
   Download, Upload, Home as HomeIcon, CheckSquare, Calendar as CalendarIcon,
   Cloud, CloudOff, Loader2, Pencil, Flag, StickyNote, LogOut
 } from "lucide-react";
-import { login, logout, watchAuth, checkRedirectResult, signUpWithEmail, signInWithEmail, loadCloudData, saveCloudData } from "./firebase";
+import { logout, watchAuth, signUpWithUsername, signInWithUsername, loadCloudData, saveCloudData } from "./firebase";
 
 const STORAGE_KEY = "timelogger-data-v1";
 const COLORS = ["#FF7A1A", "#8B5FBF", "#E8637A", "#3FA66B", "#3B82C4", "#6B7280", "#F0B429", "#1AA6A6"];
@@ -132,7 +132,7 @@ function TopSyncBar({ isOnline, onExport, onImport, user, syncing }) {
       <button onClick={() => fileRef.current?.click()} title="Import backup" className="p-1.5 rounded-full bg-white/20 text-white"><Upload size={14} /></button>
       <input ref={fileRef} type="file" accept="application/json" className="hidden" onChange={onImport} />
       {user ? (
-        <button onClick={() => logout().catch(() => {})} title={`Signed in as ${user.displayName || user.email}`} className="p-1.5 rounded-full bg-white/20 text-white"><LogOut size={14} /></button>
+        <button onClick={() => logout().catch(() => {})} title={`Signed in as ${(user.email || "").replace("@timelogger.local", "")}`} className="p-1.5 rounded-full bg-white/20 text-white"><LogOut size={14} /></button>
       ) : (
         <button onClick={() => login().catch(() => {})} title="Sign in to sync" className="text-[11px] px-2 py-1 rounded-full bg-white/20 text-white">Sign in</button>
       )}
@@ -179,7 +179,7 @@ export default function App() {
   const [user, setUser] = useState(undefined); // undefined = still checking, null = logged out
   const [syncing, setSyncing] = useState(false);
   const [skippedLogin, setSkippedLogin] = useState(false);
-  const [authEmail, setAuthEmail] = useState("");
+  const [authUsername, setAuthUsername] = useState("");
   const [authPass, setAuthPass] = useState("");
   const [authMode, setAuthMode] = useState("signin"); // "signin" | "signup"
   const [authError, setAuthError] = useState("");
@@ -204,10 +204,7 @@ export default function App() {
   const [subLogName, setSubLogName] = useState("");
 
   // ---------- auth ----------
-  useEffect(() => {
-    checkRedirectResult().catch((e) => console.error("Redirect sign-in failed:", e));
-    return watchAuth(setUser);
-  }, []);
+  useEffect(() => watchAuth(setUser), []);
 
   // ---------- load ----------
   // Always read from the local copy first (works fully offline, instant).
@@ -234,6 +231,12 @@ export default function App() {
           sessions: (chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
         };
         setData(migrated);
+        // If we just signed in and this device had local data the cloud
+        // didn't have yet (or didn't have at all), push it up right away —
+        // don't wait for the next log entry to trigger a save.
+        if (user && !cloud) {
+          persist(migrated);
+        }
       }
       setLoaded(true);
     })();
@@ -393,14 +396,24 @@ export default function App() {
   }
 
   if (user === null && !skippedLogin) {
-    async function handleEmailAuth(e) {
+    async function handleAuth(e) {
       e.preventDefault();
       setAuthError("");
+      if (authUsername.trim().length < 3) { setAuthError("Username must be at least 3 characters."); return; }
       try {
-        if (authMode === "signup") await signUpWithEmail(authEmail, authPass);
-        else await signInWithEmail(authEmail, authPass);
+        if (authMode === "signup") await signUpWithUsername(authUsername, authPass);
+        else await signInWithUsername(authUsername, authPass);
       } catch (err) {
-        setAuthError(err.message.replace("Firebase: ", ""));
+        const code = err.code || "";
+        if (code.includes("invalid-credential") || code.includes("wrong-password") || code.includes("user-not-found")) {
+          setAuthError("Wrong username or password.");
+        } else if (code.includes("email-already-in-use")) {
+          setAuthError("That username is already taken.");
+        } else if (code.includes("weak-password")) {
+          setAuthError("Password must be at least 6 characters.");
+        } else {
+          setAuthError(err.message.replace("Firebase: ", ""));
+        }
       }
     }
     return (
@@ -409,8 +422,8 @@ export default function App() {
         <h1 className="text-lg font-semibold">Sign in to sync across devices</h1>
         <p className="text-sm text-gray-400 max-w-xs">Logging works offline either way. Signing in lets this device's data follow you to your other devices.</p>
 
-        <form onSubmit={handleEmailAuth} className="w-full max-w-xs flex flex-col gap-2 mt-2">
-          <input type="email" required placeholder="Email" value={authEmail} onChange={e => setAuthEmail(e.target.value)}
+        <form onSubmit={handleAuth} className="w-full max-w-xs flex flex-col gap-2 mt-2">
+          <input type="text" required autoCapitalize="off" autoCorrect="off" placeholder="Username" value={authUsername} onChange={e => setAuthUsername(e.target.value)}
             className="w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 text-sm text-gray-100 placeholder:text-gray-500" />
           <input type="password" required placeholder="Password" value={authPass} onChange={e => setAuthPass(e.target.value)}
             className="w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 text-sm text-gray-100 placeholder:text-gray-500" />
@@ -422,13 +435,7 @@ export default function App() {
         <button onClick={() => { setAuthMode(m => m === "signup" ? "signin" : "signup"); setAuthError(""); }} className="text-xs text-gray-400 underline">
           {authMode === "signup" ? "Already have an account? Sign in" : "New here? Create an account"}
         </button>
-
-        <div className="flex items-center gap-2 w-full max-w-xs my-1">
-          <div className="flex-1 h-px bg-neutral-800" /><span className="text-[11px] text-gray-500">or</span><div className="flex-1 h-px bg-neutral-800" />
-        </div>
-        <button onClick={() => login().catch(() => {})} className="px-4 py-2 rounded-lg bg-white text-neutral-900 font-medium text-sm w-full max-w-xs">Sign in with Google</button>
-        <p className="text-[11px] text-gray-500 max-w-xs">Google sign-in can be unreliable inside an installed Home Screen app on iPhone — email is more reliable here.</p>
-        <button onClick={() => setSkippedLogin(true)} className="text-xs text-gray-500 underline">Skip, use this device only</button>
+        <button onClick={() => setSkippedLogin(true)} className="text-xs text-gray-500 underline mt-2">Skip, use this device only</button>
       </div>
     );
   }
@@ -464,7 +471,7 @@ export default function App() {
           subLogOpen={subLogOpen} setSubLogOpen={setSubLogOpen}
           subLogParentId={subLogParentId} setSubLogParentId={setSubLogParentId}
           subLogName={subLogName} setSubLogName={setSubLogName}
-          isOnline={isOnline} user={user} syncing={syncing}
+          isOnline={isOnline}
           onExport={handleExport} onImport={handleImport}
           now={now}
         />
@@ -590,7 +597,7 @@ function HomeScreen(props) {
     logMenuId, setLogMenuId, renameId, setRenameId, renameVal, setRenameVal, renameLog, deleteLog, moveLog,
     colorPickerId, setColorPickerId, setLogColor,
     expandedId, setExpandedId, subLogOpen, setSubLogOpen, subLogParentId, setSubLogParentId, subLogName, setSubLogName,
-    isOnline, user, syncing, onExport, onImport,
+    isOnline, onExport, onImport,
     manualOpen, setManualOpen, manualLogId, setManualLogId, manualDate, setManualDate,
     manualMode, setManualMode, manualStart, setManualStart, manualEnd, setManualEnd,
     manualH, setManualH, manualM, setManualM, addManualSession,
