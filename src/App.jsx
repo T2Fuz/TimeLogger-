@@ -6,7 +6,7 @@ import {
 import {
   Play, Pause, Plus, X, Check, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Trash2,
   Download, Upload, Home as HomeIcon, CheckSquare, Calendar as CalendarIcon,
-  Cloud, CloudOff, Loader2, Pencil, Flag, StickyNote, LogOut
+  Cloud, CloudOff, Loader2, Pencil, Flag, StickyNote, LogOut, Settings as SettingsIcon
 } from "lucide-react";
 import { logout, watchAuth, signUpWithUsername, signInWithUsername, loadCloudData, saveCloudData } from "./firebase";
 
@@ -57,8 +57,22 @@ function fmtHM(totalSeconds) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
   return `${h}:${pad(m)}`;
 }
+// App-wide display settings. Kept as plain mutable module state (not React
+// state/props) on purpose: dozens of small formatting functions across many
+// components read these, and threading them through every prop chain is
+// exactly the kind of wiring that has caused missed-prop bugs before here.
+// updateAppSettings() is called whenever the user's saved settings change.
+let CURRENT_RESET_HOUR = 3;
+let CURRENT_TIME_FORMAT = "24h"; // "24h" | "12h"
+function updateAppSettings(settings) {
+  if (!settings) return;
+  if (typeof settings.dayResetHour === "number") CURRENT_RESET_HOUR = settings.dayResetHour;
+  if (settings.timeFormat === "12h" || settings.timeFormat === "24h") CURRENT_TIME_FORMAT = settings.timeFormat;
+}
+
 function fmtClock(ts) {
   const d = new Date(ts);
+  if (CURRENT_TIME_FORMAT === "12h") return fmtAMPM(ts);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 function fmtAMPM(ts) {
@@ -68,10 +82,9 @@ function fmtAMPM(ts) {
   h = h % 12; if (h === 0) h = 12;
   return `${ap} ${h}:${pad(d.getMinutes())}`;
 }
-const DAY_START_HOUR = 3; // logical day runs 3:00 AM to 3:00 AM
 function dateKey(d) {
   const dt = new Date(d);
-  dt.setHours(dt.getHours() - DAY_START_HOUR);
+  dt.setHours(dt.getHours() - CURRENT_RESET_HOUR);
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
 }
 // hour-of-day on a 3AM-3AM scale: times before 3AM read as 24:xx-26:xx so they still
@@ -79,7 +92,7 @@ function dateKey(d) {
 function logicalMinutes(ts) {
   const d = new Date(ts);
   let h = d.getHours() + d.getMinutes() / 60;
-  if (h < DAY_START_HOUR) h += 24;
+  if (h < CURRENT_RESET_HOUR) h += 24;
   return Math.round(h * 60);
 }
 function minutesToClock(mins) {
@@ -103,7 +116,7 @@ function fmtLongDate(d) {
 const MONTHS_LONG = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 function defaultData() {
-  return { logs: [], sessions: [], todos: [], planner: [], dday: { label: "D-DAY", date: null } };
+  return { logs: [], sessions: [], todos: [], planner: [], dday: { label: "D-DAY", date: null }, settings: { timeFormat: "24h", dayResetHour: 3 } };
 }
 
 function Modal({ open, onClose, title, children }) {
@@ -165,6 +178,7 @@ function tooltipMin(v) { return `${Math.round(v)} min`; }
 
 export default function App() {
   const [data, setData] = useState(defaultData());
+  useEffect(() => { updateAppSettings(data.settings); }, [data.settings]);
   const dataRef = useRef(data);
   useEffect(() => { dataRef.current = data; }, [data]);
 
@@ -210,6 +224,7 @@ export default function App() {
   const [subLogOpen, setSubLogOpen] = useState(false);
   const [subLogParentId, setSubLogParentId] = useState(null);
   const [subLogName, setSubLogName] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // ---------- auth ----------
   useEffect(() => watchAuth(setUser), []);
@@ -484,6 +499,7 @@ export default function App() {
           subLogParentId={subLogParentId} setSubLogParentId={setSubLogParentId}
           subLogName={subLogName} setSubLogName={setSubLogName}
           isOnline={isOnline} user={user} syncing={syncing} setSkippedLogin={setSkippedLogin}
+          settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen}
           onExport={handleExport} onImport={handleImport}
           now={now}
         />
@@ -609,7 +625,7 @@ function HomeScreen(props) {
     logMenuId, setLogMenuId, renameId, setRenameId, renameVal, setRenameVal, renameLog, deleteLog, moveLog,
     colorPickerId, setColorPickerId, setLogColor, setLogNote,
     expandedId, setExpandedId, subLogOpen, setSubLogOpen, subLogParentId, setSubLogParentId, subLogName, setSubLogName,
-    isOnline, user, syncing, setSkippedLogin, onExport, onImport,
+    isOnline, user, syncing, setSkippedLogin, settingsOpen, setSettingsOpen, onExport, onImport,
     manualOpen, setManualOpen, manualLogId, setManualLogId, manualDate, setManualDate,
     manualMode, setManualMode, manualStart, setManualStart, manualEnd, setManualEnd,
     manualH, setManualH, manualM, setManualM, addManualSession,
@@ -621,8 +637,9 @@ function HomeScreen(props) {
   return (
     <div>
       <div className="rounded-b-3xl px-5 pt-5 pb-6 text-white" style={{ background: "linear-gradient(135deg,#FF8A2A,#FF6B00)" }}>
-        <div className="flex items-center justify-end mb-4">
+        <div className="flex items-center justify-end mb-4 gap-2">
           <TopSyncBar isOnline={isOnline} onExport={onExport} onImport={onImport} user={user} syncing={syncing} setSkippedLogin={setSkippedLogin} />
+          <button onClick={() => setSettingsOpen(true)} title="Settings" className="p-1.5 rounded-full bg-white/20 text-white"><SettingsIcon size={14} /></button>
         </div>
         <div className="text-sm font-medium text-white/80 mb-1">{fmtLongDate(new Date())}</div>
         <div className="text-4xl font-bold tracking-tight tabular-nums">{fmtHMS(todayTotal)}</div>
@@ -699,6 +716,33 @@ function HomeScreen(props) {
       {homeTab === "stats" && <StatisticsPanel data={data} activeTimer={activeTimer} now={props.now} statsTab={props.statsTab} setStatsTab={props.setStatsTab} periodRange={props.periodRange} setPeriodRange={props.setPeriodRange} customFrom={props.customFrom} setCustomFrom={props.setCustomFrom} customTo={props.customTo} setCustomTo={props.setCustomTo} scheduleSave={props.scheduleSave} />}
 
       {homeTab === "planner" && <PlannerPanel data={data} scheduleSave={props.scheduleSave} />}
+
+      <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Settings">
+        <div className="mb-5">
+          <label className="text-xs text-gray-400 block mb-2">Time format</label>
+          <div className="flex gap-2">
+            {[["24h", "24-hour (14:30)"], ["12h", "12-hour (2:30 PM)"]].map(([val, label]) => (
+              <button key={val}
+                onClick={() => props.scheduleSave({ ...data, settings: { ...(data.settings || {}), timeFormat: val } })}
+                className={`flex-1 py-2 rounded-lg text-xs font-medium ${(data.settings?.timeFormat || "24h") === val ? "bg-orange-500 text-white" : "bg-neutral-800 text-gray-400"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-gray-400 block mb-2">Day reset time</label>
+          <p className="text-[11px] text-gray-500 mb-2">A new "day" starts at this hour. Anything logged before it still counts toward the previous day — handy if you stay up past midnight.</p>
+          <select
+            value={data.settings?.dayResetHour ?? 3}
+            onChange={e => props.scheduleSave({ ...data, settings: { ...(data.settings || {}), dayResetHour: Number(e.target.value) } })}
+            className="w-full border border-neutral-700 bg-neutral-900 text-gray-100 rounded-lg px-3 py-2 text-sm">
+            {Array.from({ length: 24 }, (_, h) => (
+              <option key={h} value={h}>{h === 0 ? "12:00 AM (midnight)" : h < 12 ? `${h}:00 AM` : h === 12 ? "12:00 PM (noon)" : `${h - 12}:00 PM`}</option>
+            ))}
+          </select>
+        </div>
+      </Modal>
 
       <Modal open={addLogOpen} onClose={() => setAddLogOpen(false)} title="Add log name">
         <input autoFocus value={newLogName} onChange={e => setNewLogName(e.target.value)}
@@ -1418,11 +1462,11 @@ function DaySummary({ data, sessions, selected, dayTotals }) {
           </div>
           <div>
             <div className="text-xs text-orange-400 font-medium mb-1">Start time</div>
-            <div className="text-2xl font-bold text-gray-100">{firstStart ? fmtAMPM(firstStart) : "--:--"}</div>
+            <div className="text-2xl font-bold text-gray-100">{firstStart ? fmtClock(firstStart) : "--:--"}</div>
           </div>
           <div>
             <div className="text-xs text-orange-400 font-medium mb-1">End time</div>
-            <div className="text-2xl font-bold text-gray-100">{lastEnd ? fmtAMPM(lastEnd) : "--:--"}</div>
+            <div className="text-2xl font-bold text-gray-100">{lastEnd ? fmtClock(lastEnd) : "--:--"}</div>
           </div>
         </div>
         <div className="border-t border-neutral-800 pt-3">
