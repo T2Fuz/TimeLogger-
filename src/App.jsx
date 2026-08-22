@@ -11,6 +11,7 @@ import {
 import { logout, watchAuth, signUpWithUsername, signInWithUsername, loadCloudData, saveCloudData } from "./firebase";
 
 const STORAGE_KEY = "timelogger-data-v1";
+const ACTIVE_TIMER_KEY = "timelogger-active-timer-v1";
 const COLORS = ["#FF7A1A", "#8B5FBF", "#E8637A", "#3FA66B", "#3B82C4", "#6B7280", "#F0B429", "#1AA6A6"];
 
 function hslToHex(h, s, l) {
@@ -132,7 +133,9 @@ function TopSyncBar({ isOnline, onExport, onImport, user, syncing }) {
       <button onClick={() => fileRef.current?.click()} title="Import backup" className="p-1.5 rounded-full bg-white/20 text-white"><Upload size={14} /></button>
       <input ref={fileRef} type="file" accept="application/json" className="hidden" onChange={onImport} />
       {user ? (
-        <button onClick={() => logout().catch(() => {})} title={`Signed in as ${(user.email || "").replace("@timelogger.local", "")}`} className="p-1.5 rounded-full bg-white/20 text-white"><LogOut size={14} /></button>
+        <button onClick={() => logout().catch(() => {})} title={`Signed in as ${(user.email || "").replace("@timelogger.local", "")}`} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-white/20 text-white">
+          <LogOut size={13} /> Sign out
+        </button>
       ) : (
         <button onClick={() => login().catch(() => {})} title="Sign in to sync" className="text-[11px] px-2 py-1 rounded-full bg-white/20 text-white">Sign in</button>
       )}
@@ -166,11 +169,16 @@ export default function App() {
   useEffect(() => { dataRef.current = data; }, [data]);
 
   const [loaded, setLoaded] = useState(false);
-  const [activeTimer, setActiveTimer] = useState(null);
+  const [activeTimer, setActiveTimer] = useState(() => {
+    try {
+      const raw = localStorage.getItem(ACTIVE_TIMER_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  });
   const [now, setNow] = useState(Date.now());
   const [nav, setNav] = useState("home");
   const [homeTab, setHomeTab] = useState("timer");
-  const [statsTab, setStatsTab] = useState("period");
+  const [statsTab, setStatsTab] = useState("day");
   const [periodRange, setPeriodRange] = useState(30);
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -271,6 +279,10 @@ export default function App() {
 
   // ---------- timer tick ----------
   useEffect(() => {
+    try {
+      if (activeTimer) localStorage.setItem(ACTIVE_TIMER_KEY, JSON.stringify(activeTimer));
+      else localStorage.removeItem(ACTIVE_TIMER_KEY);
+    } catch (e) {}
     if (!activeTimer) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
@@ -595,7 +607,7 @@ function HomeScreen(props) {
     data, activeTimer, toggleLog, currentFocus, todayTotal, logTodayTotal,
     homeTab, setHomeTab, addLogOpen, setAddLogOpen, newLogName, setNewLogName, addLog,
     logMenuId, setLogMenuId, renameId, setRenameId, renameVal, setRenameVal, renameLog, deleteLog, moveLog,
-    colorPickerId, setColorPickerId, setLogColor,
+    colorPickerId, setColorPickerId, setLogColor, setLogNote,
     expandedId, setExpandedId, subLogOpen, setSubLogOpen, subLogParentId, setSubLogParentId, subLogName, setSubLogName,
     isOnline, user, syncing, onExport, onImport,
     manualOpen, setManualOpen, manualLogId, setManualLogId, manualDate, setManualDate,
@@ -644,7 +656,7 @@ function HomeScreen(props) {
                   siblings={topLevelLogs}
                   renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                   logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
-                  setLogColor={setLogColor} deleteLog={deleteLog} moveLog={moveLog}
+                  setLogColor={setLogColor} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote}
                   isExpanded={isExpanded} onToggleExpand={() => setExpandedId(isExpanded ? null : log.id)}
                 />
                 {isExpanded && (
@@ -656,7 +668,7 @@ function HomeScreen(props) {
                         siblings={children} isChild
                         renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                         logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
-                        setLogColor={setLogColor} deleteLog={deleteLog} moveLog={moveLog}
+                        setLogColor={setLogColor} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote}
                       />
                     ))}
                     <div className="pl-10 pr-5 py-2.5 bg-neutral-950/40 border-b border-neutral-800">
@@ -1029,7 +1041,7 @@ function CalendarScreen({ data, activeTimer, currentFocus, scheduleSave }) {
 
 // ================= STATISTICS =================
 function StatisticsPanel({ data, activeTimer, now, statsTab, setStatsTab, periodRange, setPeriodRange, customFrom, setCustomFrom, customTo, setCustomTo, scheduleSave }) {
-  const tabs = [["period", "Period"], ["day", "Day"], ["week", "Week"], ["month", "Month"], ["trend", "Trend"]];
+  const tabs = [["day", "Day"], ["week", "Week"], ["month", "Month"], ["trend", "Trend"], ["period", "Period"]];
   return (
     <div className="p-4">
       <div className="flex gap-2 overflow-x-auto pb-1 mb-4 -mx-1 px-1">
