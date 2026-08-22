@@ -7,6 +7,7 @@ import {
   initializeFirestore, getFirestore, doc, getDoc, setDoc, persistentLocalCache,
 } from "firebase/firestore";
 
+// Your Firebase project's keys (from Project settings > Your apps)
 const firebaseConfig = {
   apiKey: "AIzaSyAdMBUoq21Jkrt4Vq-h9nNVimSGOyftx7Q",
   authDomain: "time-logger-d7e5a.firebaseapp.com",
@@ -20,6 +21,11 @@ const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 
+// persistentLocalCache = the "offline" magic: writes go to a local cache
+// first (works with zero internet) and Firestore syncs them to the cloud
+// automatically whenever a connection is available.
+// Some browser contexts (private tabs, restricted storage) can reject this —
+// fall back to a normal (memory-only) Firestore instance instead of crashing.
 export let db;
 try {
   db = initializeFirestore(app, { localCache: persistentLocalCache({}) });
@@ -28,6 +34,9 @@ try {
   db = getFirestore(app);
 }
 
+// Firebase Auth only understands emails, not usernames. So we turn a
+// username into a fake, fixed-domain email behind the scenes — the person
+// only ever sees "username" on screen, never this.
 function usernameToEmail(username) {
   const clean = username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "");
   return `${clean}@timelogger.local`;
@@ -46,6 +55,7 @@ export function watchAuth(cb) {
   return onAuthStateChanged(auth, cb);
 }
 
+// One document per user holds the whole app's data (logs, sessions, todos...).
 export async function loadCloudData(uid) {
   const ref = doc(db, "users", uid);
   const snap = await getDoc(ref);

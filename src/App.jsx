@@ -121,7 +121,7 @@ function Modal({ open, onClose, title, children }) {
   );
 }
 
-function TopSyncBar({ isOnline, onExport, onImport, user, syncing }) {
+function TopSyncBar({ isOnline, onExport, onImport, user, syncing, setSkippedLogin }) {
   const fileRef = useRef(null);
   return (
     <div className="flex items-center gap-2">
@@ -137,7 +137,7 @@ function TopSyncBar({ isOnline, onExport, onImport, user, syncing }) {
           <LogOut size={13} /> Sign out
         </button>
       ) : (
-        <button onClick={() => login().catch(() => {})} title="Sign in to sync" className="text-[11px] px-2 py-1 rounded-full bg-white/20 text-white">Sign in</button>
+        <button onClick={() => setSkippedLogin(false)} title="Sign in to sync" className="text-[11px] px-2 py-1 rounded-full bg-white/20 text-white">Sign in</button>
       )}
     </div>
   );
@@ -483,7 +483,7 @@ export default function App() {
           subLogOpen={subLogOpen} setSubLogOpen={setSubLogOpen}
           subLogParentId={subLogParentId} setSubLogParentId={setSubLogParentId}
           subLogName={subLogName} setSubLogName={setSubLogName}
-          isOnline={isOnline}
+          isOnline={isOnline} user={user} syncing={syncing} setSkippedLogin={setSkippedLogin}
           onExport={handleExport} onImport={handleImport}
           now={now}
         />
@@ -609,7 +609,7 @@ function HomeScreen(props) {
     logMenuId, setLogMenuId, renameId, setRenameId, renameVal, setRenameVal, renameLog, deleteLog, moveLog,
     colorPickerId, setColorPickerId, setLogColor, setLogNote,
     expandedId, setExpandedId, subLogOpen, setSubLogOpen, subLogParentId, setSubLogParentId, subLogName, setSubLogName,
-    isOnline, user, syncing, onExport, onImport,
+    isOnline, user, syncing, setSkippedLogin, onExport, onImport,
     manualOpen, setManualOpen, manualLogId, setManualLogId, manualDate, setManualDate,
     manualMode, setManualMode, manualStart, setManualStart, manualEnd, setManualEnd,
     manualH, setManualH, manualM, setManualM, addManualSession,
@@ -622,7 +622,7 @@ function HomeScreen(props) {
     <div>
       <div className="rounded-b-3xl px-5 pt-5 pb-6 text-white" style={{ background: "linear-gradient(135deg,#FF8A2A,#FF6B00)" }}>
         <div className="flex items-center justify-end mb-4">
-          <TopSyncBar isOnline={isOnline} onExport={onExport} onImport={onImport} user={user} syncing={syncing} />
+          <TopSyncBar isOnline={isOnline} onExport={onExport} onImport={onImport} user={user} syncing={syncing} setSkippedLogin={setSkippedLogin} />
         </div>
         <div className="text-sm font-medium text-white/80 mb-1">{fmtLongDate(new Date())}</div>
         <div className="text-4xl font-bold tracking-tight tabular-nums">{fmtHMS(todayTotal)}</div>
