@@ -22,6 +22,13 @@ function hslToHex(h, s, l) {
   const toHex = x => Math.round(255 * x).toString(16).padStart(2, "0");
   return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
 }
+function satOf(hex) {
+  let r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, l = (max + min) / 2;
+  if (d === 0) return 0;
+  const s = d / (1 - Math.abs(2 * l - 1));
+  return Math.round(s * 100);
+}
 function hueOf(hex) {
   let r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
@@ -335,6 +342,11 @@ export default function App() {
     scheduleSave({ ...data, logs: data.logs.map(l => l.id === id ? { ...l, color } : l) });
     setColorPickerId(null); setLogMenuId(null);
   }
+  // Same update, but keeps the color-wheel popover open — used while the
+  // user is actively dragging, so it doesn't vanish after the first move.
+  function setLogColorLive(id, color) {
+    scheduleSave({ ...data, logs: data.logs.map(l => l.id === id ? { ...l, color } : l) });
+  }
   function setLogNote(id, note) {
     scheduleSave({ ...data, logs: data.logs.map(l => l.id === id ? { ...l, note } : l) });
   }
@@ -492,7 +504,7 @@ export default function App() {
           logMenuId={logMenuId} setLogMenuId={setLogMenuId}
           renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal}
           renameLog={renameLog} deleteLog={deleteLog} moveLog={moveLog}
-          colorPickerId={colorPickerId} setColorPickerId={setColorPickerId} setLogColor={setLogColor}
+          colorPickerId={colorPickerId} setColorPickerId={setColorPickerId} setLogColor={setLogColor} setLogColorLive={setLogColorLive}
           setLogNote={setLogNote}
           expandedId={expandedId} setExpandedId={setExpandedId}
           subLogOpen={subLogOpen} setSubLogOpen={setSubLogOpen}
@@ -513,9 +525,79 @@ export default function App() {
 }
 
 // ================= HOME =================
+// Circular hue/saturation picker: angle around the wheel sets hue, distance
+// from the center sets saturation (center = white/desaturated, edge = full
+// hue). Lightness stays fixed so colors read consistently in the app's UI.
+function ColorWheel({ color, onChange }) {
+  const wheelRef = useRef(null);
+  const hue = hueOf(color);
+  const sat = satOf(color);
+
+  function posFromEvent(e) {
+    const rect = wheelRef.current.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+    const point = e.touches ? e.touches[0] : e;
+    const dx = point.clientX - cx, dy = point.clientY - cy;
+    const radius = rect.width / 2;
+    let dist = Math.sqrt(dx * dx + dy * dy) / radius;
+    dist = Math.max(0, Math.min(1, dist));
+    // atan2 gives 0deg at 3 o'clock going counter-clockwise; convert to a
+    // clockwise-from-12-o'clock angle to match the CSS conic-gradient below.
+    let angle = (Math.atan2(dy, dx) * 180) / Math.PI + 90;
+    if (angle < 0) angle += 360;
+    onChange(hslToHex(Math.round(angle), Math.round(dist * 100), 55));
+  }
+
+  function startDrag(e) {
+    e.preventDefault();
+    posFromEvent(e);
+    const move = (ev) => posFromEvent(ev);
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("touchend", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("touchmove", move, { passive: false });
+    window.addEventListener("touchend", stop);
+  }
+
+  const radiusPct = sat / 2; // sat 0-100 -> 0-50% of wheel radius from center
+  const angleRad = ((hue - 90) * Math.PI) / 180;
+  const dotLeft = 50 + radiusPct * Math.cos(angleRad);
+  const dotTop = 50 + radiusPct * Math.sin(angleRad);
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div
+        ref={wheelRef}
+        onPointerDown={startDrag}
+        onTouchStart={startDrag}
+        className="relative rounded-full cursor-pointer touch-none select-none"
+        style={{
+          width: 160, height: 160,
+          background: `radial-gradient(circle at center, #fff 0%, rgba(255,255,255,0) 70%),
+                       conic-gradient(from 0deg, hsl(0,100%,50%), hsl(60,100%,50%), hsl(120,100%,50%), hsl(180,100%,50%), hsl(240,100%,50%), hsl(300,100%,50%), hsl(360,100%,50%))`,
+        }}
+      >
+        <div
+          className="absolute w-5 h-5 rounded-full border-2 border-white shadow -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+          style={{ left: `${dotLeft}%`, top: `${dotTop}%`, backgroundColor: color, boxShadow: "0 0 0 1px rgba(0,0,0,0.3)" }}
+        />
+      </div>
+      <div className="flex items-center gap-2 text-[11px] text-gray-500">
+        <span className="w-4 h-4 rounded-full border border-neutral-700" style={{ backgroundColor: color }} />
+        drag to pick a colour
+      </div>
+    </div>
+  );
+}
+
 function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
   renameId, setRenameId, renameVal, setRenameVal, renameLog,
-  logMenuId, setLogMenuId, colorPickerId, setColorPickerId, setLogColor, setLogNote, deleteLog, moveLog,
+  logMenuId, setLogMenuId, colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogNote, deleteLog, moveLog,
   isChild, isExpanded, onToggleExpand }) {
   const isActive = activeTimer && activeTimer.logId === log.id;
   const idx = siblings.findIndex(l => l.id === log.id);
@@ -579,18 +661,8 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
               <span className="w-3.5 h-3.5 rounded-full border border-neutral-600" style={{ backgroundColor: log.color }} />Change colour
             </button>
             {colorPickerId === log.id && (
-              <div className="px-4 pb-3 pt-1 w-56">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="w-6 h-6 rounded-full border border-neutral-700 shrink-0" style={{ backgroundColor: log.color }} />
-                  <input
-                    type="range" min="0" max="360" step="1"
-                    value={hueOf(log.color)}
-                    onChange={e => setLogColor(log.id, hslToHex(Number(e.target.value), 75, 55))}
-                    className="flex-1 h-2 rounded-full appearance-none cursor-pointer"
-                    style={{ background: "linear-gradient(to right, hsl(0,75%,55%), hsl(60,75%,55%), hsl(120,75%,55%), hsl(180,75%,55%), hsl(240,75%,55%), hsl(300,75%,55%), hsl(360,75%,55%))" }}
-                  />
-                </div>
-                <div className="text-[10px] text-gray-500 text-right">drag to change hue</div>
+              <div className="px-4 pb-3 pt-1 flex justify-center">
+                <ColorWheel color={log.color} onChange={(hex) => setLogColorLive(log.id, hex)} />
               </div>
             )}
             <button onClick={() => deleteLog(log.id)} className="flex items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-neutral-800 w-full"><Trash2 size={14} />Delete</button>
@@ -623,7 +695,7 @@ function HomeScreen(props) {
     data, activeTimer, toggleLog, currentFocus, todayTotal, logTodayTotal,
     homeTab, setHomeTab, addLogOpen, setAddLogOpen, newLogName, setNewLogName, addLog,
     logMenuId, setLogMenuId, renameId, setRenameId, renameVal, setRenameVal, renameLog, deleteLog, moveLog,
-    colorPickerId, setColorPickerId, setLogColor, setLogNote,
+    colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogNote,
     expandedId, setExpandedId, subLogOpen, setSubLogOpen, subLogParentId, setSubLogParentId, subLogName, setSubLogName,
     isOnline, user, syncing, setSkippedLogin, settingsOpen, setSettingsOpen, onExport, onImport,
     manualOpen, setManualOpen, manualLogId, setManualLogId, manualDate, setManualDate,
@@ -673,7 +745,7 @@ function HomeScreen(props) {
                   siblings={topLevelLogs}
                   renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                   logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
-                  setLogColor={setLogColor} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote}
+                  setLogColor={setLogColor} setLogColorLive={setLogColorLive} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote}
                   isExpanded={isExpanded} onToggleExpand={() => setExpandedId(isExpanded ? null : log.id)}
                 />
                 {isExpanded && (
@@ -685,7 +757,7 @@ function HomeScreen(props) {
                         siblings={children} isChild
                         renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                         logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
-                        setLogColor={setLogColor} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote}
+                        setLogColor={setLogColor} setLogColorLive={setLogColorLive} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote}
                       />
                     ))}
                     <div className="pl-10 pr-5 py-2.5 bg-neutral-950/40 border-b border-neutral-800">
