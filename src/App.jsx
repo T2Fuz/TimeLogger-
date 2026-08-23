@@ -984,6 +984,52 @@ function SessionRow({ session, data, scheduleSave }) {
   );
 }
 
+function GroupedSessionList({ sessions, data, scheduleSave }) {
+  const [expanded, setExpanded] = useState({});
+  const groups = useMemo(() => {
+    const map = {};
+    sessions.forEach(s => { (map[s.logId] = map[s.logId] || []).push(s); });
+    return Object.entries(map)
+      .map(([logId, list]) => ({
+        logId,
+        log: data.logs.find(l => l.id === logId),
+        list: [...list].sort((a, b) => a.start - b.start),
+        total: list.reduce((a, s) => a + s.duration, 0),
+      }))
+      .sort((a, b) => b.total - a.total);
+  }, [sessions, data.logs]);
+
+  if (groups.length === 0) return <div className="text-gray-500 text-sm">No sessions logged.</div>;
+
+  return (
+    <div className="space-y-1.5">
+      {groups.map(g => {
+        if (g.list.length === 1) {
+          return <SessionRow key={g.logId} session={g.list[0]} data={data} scheduleSave={scheduleSave} />;
+        }
+        const isOpen = !!expanded[g.logId];
+        return (
+          <div key={g.logId} className="bg-neutral-900 rounded-lg overflow-hidden">
+            <button onClick={() => setExpanded(e => ({ ...e, [g.logId]: !e[g.logId] }))}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm">
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: g.log?.color || "#999" }} />
+              <span className="flex-1 text-left text-gray-300">{g.log?.name || "Deleted log"}</span>
+              <span className="text-[10px] text-gray-500">{g.list.length}×</span>
+              <span className="text-gray-300 text-xs font-medium">{fmtHMS(g.total)}</span>
+              {isOpen ? <ChevronDown size={14} className="text-gray-500" /> : <ChevronRight size={14} className="text-gray-500" />}
+            </button>
+            {isOpen && (
+              <div className="px-2 pb-2 space-y-1">
+                {g.list.map(s => <SessionRow key={s.id} session={s} data={data} scheduleSave={scheduleSave} />)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function reorderLog(logs, id, dir) {
   const target = logs.find(l => l.id === id);
   if (!target) return logs;
@@ -1056,7 +1102,7 @@ function CalendarScreen({ data, activeTimer, currentFocus, scheduleSave }) {
               <button key={i} onClick={() => setSelected(key)}
                 className={`aspect-square rounded-lg flex flex-col items-center justify-center text-[11px] relative ${isSel ? "ring-2 ring-orange-500" : ""}`}
                 style={{ backgroundColor: heat(sec) }}>
-                <span className={sec > 3600 * 3 ? "text-white font-semibold" : "text-gray-300"}>{d}</span>
+                <span className={sec <= 0 ? "text-gray-300" : sec > 3600 * 5 ? "text-white font-semibold" : "text-neutral-900 font-medium"}>{d}</span>
                 {todoDates.has(key) && <span className="w-1 h-1 rounded-full bg-blue-500 absolute bottom-1" />}
               </button>
             );
@@ -1067,10 +1113,8 @@ function CalendarScreen({ data, activeTimer, currentFocus, scheduleSave }) {
       <div className="mt-5">
         <div className="text-sm font-semibold text-gray-100 mb-2">{selected} · {fmtHM(dayTotals[selected] || 0)}h logged</div>
         {selSessions.length === 0 && selTodos.length === 0 && <div className="text-gray-500 text-sm py-4">Nothing logged for this day.</div>}
-        <div className="space-y-1.5">
-          {selSessions.map(s => (
-            <SessionRow key={s.id} session={s} data={data} scheduleSave={scheduleSave} />
-          ))}
+        <GroupedSessionList sessions={selSessions} data={data} scheduleSave={scheduleSave} />
+        <div className="space-y-1.5 mt-1.5">
           {selTodos.map(t => (
             <div key={t.id} className="flex items-center gap-2 bg-blue-500/10 rounded-lg px-3 py-2 text-sm">
               <Flag size={13} className="text-blue-500 shrink-0" />
@@ -1552,7 +1596,7 @@ function DayStats({ data, activeTimer, now, scheduleSave }) {
             const isSel = key === selected;
             return (
               <button key={i} onClick={() => setSelected(key)} className={`aspect-square rounded-md flex items-center justify-center text-[10px] ${isSel ? "ring-2 ring-orange-500" : ""}`} style={{ backgroundColor: heat(sec) }}>
-                <span className={sec / 3600 >= 7 ? "text-white" : "text-gray-300"}>{d}</span>
+                <span className={sec <= 0 ? "text-gray-400" : sec / 3600 >= 7 ? "text-white font-semibold" : "text-neutral-900 font-medium"}>{d}</span>
               </button>
             );
           })}
@@ -1568,12 +1612,7 @@ function DayStats({ data, activeTimer, now, scheduleSave }) {
 
       <Card>
         <div className="text-sm font-semibold text-gray-300 mb-2">{selected} · {fmtHM(dayTotals[selected] || 0)}h</div>
-        {selSessions.length === 0 && <div className="text-gray-500 text-sm">No sessions logged.</div>}
-        <div className="space-y-1.5">
-          {selSessions.map(s => (
-            <SessionRow key={s.id} session={s} data={data} scheduleSave={scheduleSave} />
-          ))}
-        </div>
+        <GroupedSessionList sessions={selSessions} data={data} scheduleSave={scheduleSave} />
       </Card>
     </div>
   );
