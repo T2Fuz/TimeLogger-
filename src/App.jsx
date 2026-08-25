@@ -40,6 +40,31 @@ function hueOf(hex) {
   h = Math.round(h * 60);
   return h < 0 ? h + 360 : h;
 }
+// HSB/HSV <-> hex, used by the Photoshop-style square colour picker below
+// (kept separate from the HSL helpers above, which other parts of the app rely on).
+function hsbToHex(h, s, v) {
+  s /= 100; v /= 100;
+  const k = n => (n + h / 60) % 6;
+  const f = n => v - v * s * Math.max(0, Math.min(k(n), 4 - k(n), 1));
+  const toHex = x => Math.round(255 * x).toString(16).padStart(2, "0");
+  return `#${toHex(f(5))}${toHex(f(3))}${toHex(f(1))}`;
+}
+function hexToHsb(hex) {
+  let r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d !== 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h = Math.round(h * 60);
+    if (h < 0) h += 360;
+  }
+  const s = max === 0 ? 0 : Math.round((d / max) * 100);
+  const v = Math.round(max * 100);
+  return { h, s, v };
+}
+function isValidHex(hex) { return /^#([0-9a-fA-F]{6})$/.test(hex); }
 
 // Resolves a log id (parent or sub-log) up to its top-level ancestor id,
 // so statistics can roll sub-log time into the parent it belongs to.
@@ -528,69 +553,102 @@ export default function App() {
 // Circular hue/saturation picker: angle around the wheel sets hue, distance
 // from the center sets saturation (center = white/desaturated, edge = full
 // hue). Lightness stays fixed so colors read consistently in the app's UI.
+// Photoshop-style colour picker: a saturation/brightness square (for the
+// currently-selected hue) plus a vertical hue slider and a hex input,
+// all draggable with pointer/touch events.
 function ColorWheel({ color, onChange }) {
-  const wheelRef = useRef(null);
-  const hue = hueOf(color);
-  const sat = satOf(color);
+  const safeColor = isValidHex(color) ? color : "#3399cc";
+  const { h: hue, s: sat, v: bri } = hexToHsb(safeColor);
+  const [hexDraft, setHexDraft] = useState(safeColor.slice(1));
+  const squareRef = useRef(null);
+  const hueRef = useRef(null);
 
-  function posFromEvent(e) {
-    const rect = wheelRef.current.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-    const point = e.touches ? e.touches[0] : e;
-    const dx = point.clientX - cx, dy = point.clientY - cy;
-    const radius = rect.width / 2;
-    let dist = Math.sqrt(dx * dx + dy * dy) / radius;
-    dist = Math.max(0, Math.min(1, dist));
-    // atan2 gives 0deg at 3 o'clock going counter-clockwise; convert to a
-    // clockwise-from-12-o'clock angle to match the CSS conic-gradient below.
-    let angle = (Math.atan2(dy, dx) * 180) / Math.PI + 90;
-    if (angle < 0) angle += 360;
-    onChange(hslToHex(Math.round(angle), Math.round(dist * 100), 55));
-  }
+  useEffect(() => { setHexDraft(safeColor.slice(1)); }, [safeColor]);
 
-  function startDrag(e) {
-    e.preventDefault();
-    posFromEvent(e);
-    const move = (ev) => posFromEvent(ev);
-    const stop = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-      window.removeEventListener("touchmove", move);
-      window.removeEventListener("touchend", stop);
+  function dragTrack(ref, onMove) {
+    return function startDrag(e) {
+      e.preventDefault();
+      const move = (ev) => {
+        const rect = ref.current.getBoundingClientRect();
+        const point = ev.touches ? ev.touches[0] : ev;
+        const x = Math.max(0, Math.min(1, (point.clientX - rect.left) / rect.width));
+        const y = Math.max(0, Math.min(1, (point.clientY - rect.top) / rect.height));
+        onMove(x, y);
+      };
+      move(e);
+      const stop = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", stop);
+        window.removeEventListener("touchmove", move);
+        window.removeEventListener("touchend", stop);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", stop);
+      window.addEventListener("touchmove", move, { passive: false });
+      window.addEventListener("touchend", stop);
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
-    window.addEventListener("touchmove", move, { passive: false });
-    window.addEventListener("touchend", stop);
   }
 
-  const radiusPct = sat / 2; // sat 0-100 -> 0-50% of wheel radius from center
-  const angleRad = ((hue - 90) * Math.PI) / 180;
-  const dotLeft = 50 + radiusPct * Math.cos(angleRad);
-  const dotTop = 50 + radiusPct * Math.sin(angleRad);
+  const onSquareDrag = dragTrack(squareRef, (x, y) => {
+    onChange(hsbToHex(hue, Math.round(x * 100), Math.round((1 - y) * 100)));
+  });
+  const onHueDrag = dragTrack(hueRef, (x, y) => {
+    onChange(hsbToHex(Math.round(Math.max(0, Math.min(1, y)) * 360), sat, bri));
+  });
+
+  function commitHex(raw) {
+    const cleaned = raw.trim().replace(/^#/, "");
+    setHexDraft(cleaned);
+    const withHash = `#${cleaned}`;
+    if (isValidHex(withHash)) onChange(withHash.toLowerCase());
+  }
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      <div
-        ref={wheelRef}
-        onPointerDown={startDrag}
-        onTouchStart={startDrag}
-        className="relative rounded-full cursor-pointer touch-none select-none"
-        style={{
-          width: 160, height: 160,
-          background: `radial-gradient(circle at center, #fff 0%, rgba(255,255,255,0) 70%),
-                       conic-gradient(from 0deg, hsl(0,100%,50%), hsl(60,100%,50%), hsl(120,100%,50%), hsl(180,100%,50%), hsl(240,100%,50%), hsl(300,100%,50%), hsl(360,100%,50%))`,
-        }}
-      >
+    <div className="flex flex-col items-center gap-3">
+      <div className="flex gap-3">
         <div
-          className="absolute w-5 h-5 rounded-full border-2 border-white shadow -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-          style={{ left: `${dotLeft}%`, top: `${dotTop}%`, backgroundColor: color, boxShadow: "0 0 0 1px rgba(0,0,0,0.3)" }}
+          ref={squareRef}
+          onPointerDown={onSquareDrag}
+          onTouchStart={onSquareDrag}
+          className="relative rounded-lg cursor-crosshair touch-none select-none"
+          style={{
+            width: 180, height: 180,
+            backgroundColor: `hsl(${hue}, 100%, 50%)`,
+            backgroundImage: "linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent)",
+          }}
+        >
+          <div
+            className="absolute w-4 h-4 rounded-full border-2 border-white -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ left: `${sat}%`, top: `${100 - bri}%`, backgroundColor: safeColor, boxShadow: "0 0 0 1px rgba(0,0,0,0.4)" }}
+          />
+        </div>
+        <div
+          ref={hueRef}
+          onPointerDown={onHueDrag}
+          onTouchStart={onHueDrag}
+          className="relative rounded-lg cursor-pointer touch-none select-none"
+          style={{
+            width: 20, height: 180,
+            background: "linear-gradient(to bottom, red, yellow, lime, cyan, blue, magenta, red)",
+          }}
+        >
+          <div
+            className="absolute left-1/2 w-6 h-2.5 rounded-sm border-2 border-white -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ top: `${(hue / 360) * 100}%`, backgroundColor: `hsl(${hue}, 100%, 50%)`, boxShadow: "0 0 0 1px rgba(0,0,0,0.4)" }}
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-2 text-[11px] text-gray-400">
+        <span className="w-5 h-5 rounded-full border border-neutral-700 shrink-0" style={{ backgroundColor: safeColor }} />
+        <span>#</span>
+        <input
+          value={hexDraft}
+          onChange={e => commitHex(e.target.value)}
+          maxLength={6}
+          className="w-20 bg-neutral-950 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs uppercase tracking-wide"
         />
       </div>
-      <div className="flex items-center gap-2 text-[11px] text-gray-500">
-        <span className="w-4 h-4 rounded-full border border-neutral-700" style={{ backgroundColor: color }} />
-        drag to pick a colour
-      </div>
+      <div className="text-[10px] text-gray-500">drag the square or the bar to pick a colour</div>
     </div>
   );
 }
@@ -1059,8 +1117,12 @@ function SessionRow({ session, data, scheduleSave }) {
 function GroupedSessionList({ sessions, data, scheduleSave }) {
   const [expanded, setExpanded] = useState({});
   const groups = useMemo(() => {
+    // Group by the top-level ancestor log, not the exact log a session was
+    // logged against — so sub-logs (e.g. "Maghrib"/"Asr" under a "Prayers"
+    // parent, or "Breakfast"/"Lunch"/"Dinner" under "Eating") roll up into
+    // one entry for their parent instead of each showing up separately.
     const map = {};
-    sessions.forEach(s => { (map[s.logId] = map[s.logId] || []).push(s); });
+    sessions.forEach(s => { const rid = rootLogId(data.logs, s.logId); (map[rid] = map[rid] || []).push(s); });
     return Object.entries(map)
       .map(([logId, list]) => ({
         logId,
