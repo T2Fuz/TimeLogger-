@@ -8,7 +8,7 @@ import {
   Download, Upload, Home as HomeIcon, CheckSquare, Calendar as CalendarIcon,
   Cloud, CloudOff, Loader2, Pencil, Flag, StickyNote, LogOut, Settings as SettingsIcon
 } from "lucide-react";
-import { logout, watchAuth, signUpWithUsername, signInWithUsername, loadCloudData, saveCloudData } from "./firebase";
+import { logout, watchAuth, signUpWithUsername, signInWithUsername, loadCloudData, saveCloudData, watchCloudData, setCloudActiveTimer, watchCloudActiveTimer } from "./firebase";
 
 const STORAGE_KEY = "timelogger-data-v1";
 const ACTIVE_TIMER_KEY = "timelogger-active-timer-v1";
@@ -293,6 +293,9 @@ export default function App() {
           persist(migrated);
         }
       }
+      if (user && activeTimer) {
+        setCloudActiveTimer(user.uid, activeTimer).catch(() => {});
+      }
       setLoaded(true);
     })();
   }, [user]);
@@ -306,6 +309,7 @@ export default function App() {
   }, []);
 
   const saveTimer = useRef(null);
+  const lastSavedAtRef = useRef(0);
   function scheduleSave(next) {
     setData(next);
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -318,11 +322,48 @@ export default function App() {
     if (user) {
       try {
         setSyncing(true);
+        const savedAt = Date.now();
         await saveCloudData(user.uid, next); // Firestore queues this offline and sends it once online
+        lastSavedAtRef.current = savedAt;
         setSyncing(false);
       } catch (e) { setSyncing(false); /* will retry on next save, or Firestore's own offline queue handles it */ }
     }
   }
+
+  // ---------- live cross-device sync ----------
+  // Besides the load-once-on-login above, keep listening: if the data
+  // changes from another device (a session gets logged, a log renamed,
+  // etc.), pull it in here too — skip it if it's just the echo of our own
+  // last save landing back from the server.
+  useEffect(() => {
+    if (!user) return;
+    const unsub = watchCloudData(user.uid, (doc) => {
+      if (!doc || !doc.updatedAt || doc.updatedAt <= lastSavedAtRef.current) return;
+      const chosen = doc.payload;
+      if (!chosen) return;
+      const migrated = {
+        ...defaultData(),
+        ...chosen,
+        sessions: (chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
+      };
+      setData(migrated);
+    });
+    return unsub;
+  }, [user]);
+
+  // The currently-running timer (if any) is mirrored live across devices —
+  // so if you start "Study" on your PC, your phone shows it running too,
+  // in real time, without needing to stop it first.
+  useEffect(() => {
+    if (!user) return;
+    const unsub = watchCloudActiveTimer(user.uid, (remote) => {
+      setActiveTimer((current) => {
+        if (JSON.stringify(current) === JSON.stringify(remote)) return current;
+        return remote;
+      });
+    });
+    return unsub;
+  }, [user]);
 
   // ---------- timer tick ----------
   useEffect(() => {
@@ -337,17 +378,21 @@ export default function App() {
 
   function toggleLog(logId) {
     setActiveTimer((prev) => {
+      let next;
       if (prev) {
         const endedAt = Date.now();
         const duration = Math.round((endedAt - prev.startedAt) / 1000);
         if (duration > 0) {
           const session = { id: uid(), logId: prev.logId, date: dateKey(prev.startedAt), start: prev.startedAt, end: endedAt, duration };
-          const next = { ...dataRef.current, sessions: [...dataRef.current.sessions, session] };
-          scheduleSave(next);
+          const nextData = { ...dataRef.current, sessions: [...dataRef.current.sessions, session] };
+          scheduleSave(nextData);
         }
-        if (prev.logId === logId) return null;
+        next = prev.logId === logId ? null : { logId, startedAt: Date.now() };
+      } else {
+        next = { logId, startedAt: Date.now() };
       }
-      return { logId, startedAt: Date.now() };
+      if (user) setCloudActiveTimer(user.uid, next).catch(() => {});
+      return next;
     });
   }
 
