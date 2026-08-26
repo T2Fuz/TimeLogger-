@@ -4,7 +4,7 @@ import {
   createUserWithEmailAndPassword, signInWithEmailAndPassword,
 } from "firebase/auth";
 import {
-  initializeFirestore, getFirestore, doc, getDoc, setDoc, persistentLocalCache,
+  initializeFirestore, getFirestore, doc, getDoc, setDoc, onSnapshot, persistentLocalCache,
 } from "firebase/firestore";
 
 // Your Firebase project's keys (from Project settings > Your apps)
@@ -64,4 +64,26 @@ export async function loadCloudData(uid) {
 export async function saveCloudData(uid, data) {
   const ref = doc(db, "users", uid);
   await setDoc(ref, { payload: data, updatedAt: Date.now() });
+}
+
+export function watchCloudData(uid, cb) {
+  const ref = doc(db, "users", uid);
+  return onSnapshot(ref, (snap) => {
+    if (snap.exists()) cb(snap.data());
+  }, (err) => console.error("Data listener error:", err));
+}
+
+// A separate, tiny document just for "is a timer currently running, and
+// which one" — kept apart from the big data document so starting/stopping
+// a timer is instant on other devices, without waiting for (or triggering)
+// a full data re-sync.
+export async function setCloudActiveTimer(uid, activeTimer) {
+  const ref = doc(db, "users", uid, "meta", "activeTimer");
+  await setDoc(ref, { activeTimer: activeTimer || null, updatedAt: Date.now() });
+}
+export function watchCloudActiveTimer(uid, cb) {
+  const ref = doc(db, "users", uid, "meta", "activeTimer");
+  return onSnapshot(ref, (snap) => {
+    cb(snap.exists() ? (snap.data().activeTimer || null) : null);
+  }, (err) => console.error("Active timer listener error:", err));
 }
