@@ -129,7 +129,28 @@ export default function App() {
   // ---------- auth ----------
   useEffect(() => watchAuth(setUser), []);
 
-  // ---------- load ----------
+  // ---------- load: local data, immediately, independent of auth ----------
+  // This used to be nested inside the cloud-sync effect below, gated behind
+  // "wait until we know if you're logged in" — which meant the whole app
+  // sat on a blank loading screen until the Firebase SDK finished its
+  // network round-trip, even though reading localStorage is instant. Now
+  // the app is usable right away; the cloud check happens quietly after.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const local = JSON.parse(raw);
+        setData({
+          ...defaultData(),
+          ...local,
+          sessions: (local.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
+        });
+      }
+    } catch (e) { /* nothing saved locally yet */ }
+    setLoaded(true);
+  }, []);
+
+  // ---------- load: cloud data, once auth resolves ----------
   // Always read from the local copy first (works fully offline, instant).
   // Once logged in, also check the cloud copy and use whichever is newer.
   useEffect(() => {
@@ -286,7 +307,11 @@ export default function App() {
     scheduleSave({ ...data, logs: data.logs.map(l => l.id === id ? { ...l, color } : l) });
   }
   function setLogNote(id, note) {
-    scheduleSave({ ...data, logs: data.logs.map(l => l.id === id ? { ...l, note } : l) });
+    const key = todayKey();
+    scheduleSave({
+      ...data,
+      logs: data.logs.map(l => l.id === id ? { ...l, notesByDate: { ...(l.notesByDate || {}), [key]: note } } : l),
+    });
   }
   function deleteLog(id) {
     const childIds = data.logs.filter(l => l.parentId === id).map(l => l.id);
@@ -368,7 +393,7 @@ export default function App() {
     e.target.value = "";
   }
 
-  if (user === undefined || !loaded) {
+  if (!loaded) {
     return <div className="min-h-screen flex items-center justify-center text-gray-500"><Loader2 className="animate-spin mr-2" size={18} />Loading…</div>;
   }
 
@@ -572,11 +597,12 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
   isChild, isExpanded, onToggleExpand }) {
   const isActive = activeTimer && activeTimer.logId === log.id;
   const idx = siblings.findIndex(l => l.id === log.id);
+  const todayNote = (log.notesByDate && log.notesByDate[todayKey()]) || log.note || "";
   const [noteOpen, setNoteOpen] = useState(false);
-  const [noteDraft, setNoteDraft] = useState(log.note || "");
+  const [noteDraft, setNoteDraft] = useState(todayNote);
 
   function openNote() {
-    setNoteDraft(log.note || "");
+    setNoteDraft(todayNote);
     setNoteOpen(true);
   }
   function saveNote() {
@@ -604,14 +630,14 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
           ) : (
             <>
               <div className={isChild ? "text-sm text-gray-300" : "text-[15px] text-gray-100 font-medium"}>{log.name}</div>
-              {log.note && !noteOpen && (
-                <div className="text-[11px] text-gray-500 truncate max-w-[160px]">{log.note}</div>
+              {todayNote && !noteOpen && (
+                <div className="text-[11px] text-gray-500 truncate max-w-[160px]">{todayNote}</div>
               )}
             </>
           )}
         </div>
         <span className={`text-sm tabular-nums ${isActive ? "text-orange-400 font-semibold" : "text-gray-400"}`}>{fmtHMS(logTodayTotal(log.id))}</span>
-        <button onClick={() => (noteOpen ? setNoteOpen(false) : openNote())} className={`p-1 shrink-0 ${log.note ? "text-orange-400" : "text-gray-500"} hover:text-orange-400`}>
+        <button onClick={() => (noteOpen ? setNoteOpen(false) : openNote())} className={`p-1 shrink-0 ${todayNote ? "text-orange-400" : "text-gray-500"} hover:text-orange-400`}>
           <StickyNote size={15} />
         </button>
         <div className="flex flex-col shrink-0">
@@ -645,13 +671,14 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
         <div className={`mt-2 ${isChild ? "ml-9" : "ml-11"}`}>
           <textarea
             autoFocus rows={2} value={noteDraft} onChange={e => setNoteDraft(e.target.value)}
-            placeholder="Add a note for this log…"
+            placeholder="Add a note for today…"
             className="w-full bg-neutral-950 border border-neutral-700 text-gray-100 rounded-lg px-3 py-2 text-xs placeholder:text-gray-500 resize-none"
           />
+          <div className="text-[10px] text-gray-600 mt-1">Resets when the day rolls over (see Settings → Day reset time).</div>
           <div className="flex gap-2 mt-1.5">
             <button onClick={saveNote} className="bg-orange-500 text-white rounded-lg px-3 py-1 text-xs font-medium">Save</button>
             <button onClick={() => setNoteOpen(false)} className="border border-neutral-700 text-gray-400 rounded-lg px-3 py-1 text-xs">Cancel</button>
-            {log.note && (
+            {todayNote && (
               <button onClick={() => { setLogNote(log.id, ""); setNoteDraft(""); setNoteOpen(false); }} className="text-red-400 text-xs ml-auto">Remove note</button>
             )}
           </div>
