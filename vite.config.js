@@ -7,6 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
+      injectRegister: false,
       includeAssets: ["favicon.ico", "favicon-16.png", "favicon-32.png", "apple-touch-icon.png"],
       manifest: {
         name: "Time Logger",
@@ -22,8 +23,26 @@ export default defineConfig({
       },
       workbox: {
         // Cache the app shell so it opens instantly with zero connection.
-        globPatterns: ["**/*.{js,css,html,ico,png,svg}"]
-      }
+        globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
+        // iOS Safari's PWA update check can be unreliable with the default
+        // settings — these two make it check for a new version every time
+        // the app is opened, instead of only occasionally.
+        skipWaiting: true,
+        clientsClaim: true,
+      },
+      devOptions: { enabled: false }
     })
-  ]
+  ],
+  build: {
+    modulePreload: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          charts: ["recharts"],
+          icons: ["lucide-react"],
+          firebase: ["firebase/app", "firebase/auth", "firebase/firestore"],
+        },
+      },
+    },
+  },
 });
