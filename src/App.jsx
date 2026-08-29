@@ -182,9 +182,6 @@ export default function App() {
           persist(migrated);
         }
       }
-      if (user && activeTimer) {
-        setCloudActiveTimer(user.uid, activeTimer).catch(() => {});
-      }
       setLoaded(true);
     })();
   }, [user]);
@@ -597,7 +594,8 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
   isChild, isExpanded, onToggleExpand }) {
   const isActive = activeTimer && activeTimer.logId === log.id;
   const idx = siblings.findIndex(l => l.id === log.id);
-  const todayNote = (log.notesByDate && log.notesByDate[todayKey()]) || log.note || "";
+  const hasDatedNotes = !!log.notesByDate;
+  const todayNote = hasDatedNotes ? (log.notesByDate[todayKey()] || "") : (log.note || "");
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState(todayNote);
 
