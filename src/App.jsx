@@ -319,13 +319,18 @@ export default function App() {
     });
   }
   function deleteLog(id) {
+    // "Delete" now archives instead of erasing: the log (and its sub-logs)
+    // disappear from the Timer list so you can't accidentally log more time
+    // against them, but every session already recorded stays intact and
+    // keeps showing up in Statistics/Calendar under that log's name and
+    // colour — deleting a timer should never wipe out history you already
+    // built up under it.
     const childIds = data.logs.filter(l => l.parentId === id).map(l => l.id);
-    const removeIds = [id, ...childIds];
-    if (activeTimer && removeIds.includes(activeTimer.logId)) setActiveTimer(null);
+    const archiveIds = [id, ...childIds];
+    if (activeTimer && archiveIds.includes(activeTimer.logId)) setActiveTimer(null);
     scheduleSave({
       ...data,
-      logs: data.logs.filter(l => !removeIds.includes(l.id)),
-      sessions: data.sessions.filter(s => !removeIds.includes(s.logId)),
+      logs: data.logs.map(l => archiveIds.includes(l.id) ? { ...l, archived: true } : l),
     });
     setLogMenuId(null);
     setExpandedId(prev => (prev === id ? null : prev));
@@ -608,7 +613,7 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState(todayNote);
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
-  const moveTargets = (allLogs || []).filter(l => !l.parentId && l.id !== log.id);
+  const moveTargets = (allLogs || []).filter(l => !l.parentId && l.id !== log.id && !l.archived);
   const hasOwnChildren = (allLogs || []).some(l => l.parentId === log.id);
 
   function openNote() {
@@ -737,7 +742,7 @@ function HomeScreen(props) {
     manualH, setManualH, manualM, setManualM, addManualSession,
   } = props;
 
-  const topLevelLogs = data.logs.filter(l => !l.parentId);
+  const topLevelLogs = data.logs.filter(l => !l.parentId && !l.archived);
   const subLogParent = data.logs.find(l => l.id === subLogParentId);
 
   return (
@@ -770,7 +775,7 @@ function HomeScreen(props) {
             <div className="px-5 py-10 text-center text-gray-500 text-sm">No logs yet. Add one to start tracking time.</div>
           )}
           {topLevelLogs.map(log => {
-            const children = data.logs.filter(l => l.parentId === log.id);
+            const children = data.logs.filter(l => l.parentId === log.id && !l.archived);
             const isExpanded = expandedId === log.id;
             return (
               <div key={log.id}>
@@ -854,6 +859,26 @@ function HomeScreen(props) {
             ))}
           </select>
         </div>
+
+        {data.logs.some(l => l.archived) && (
+          <div className="mt-5 pt-4 border-t border-neutral-800">
+            <label className="text-xs text-gray-400 block mb-2">Deleted timers</label>
+            <p className="text-[11px] text-gray-500 mb-2">Deleting a timer only hides it here — its logged time stays in Statistics. Restore one if you deleted it by mistake.</p>
+            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+              {data.logs.filter(l => l.archived).map(l => (
+                <div key={l.id} className="flex items-center gap-2 bg-neutral-900 rounded-lg px-3 py-2 text-sm">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: l.color }} />
+                  <span className="flex-1 text-gray-300">{l.parentId ? `— ${l.name}` : l.name}</span>
+                  <button
+                    onClick={() => props.scheduleSave({ ...data, logs: data.logs.map(x => x.id === l.id ? { ...x, archived: false } : x) })}
+                    className="text-xs text-orange-400 hover:text-orange-300 font-medium">
+                    Restore
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </Modal>
 
       <Modal open={addLogOpen} onClose={() => setAddLogOpen(false)} title="Add log name">
@@ -874,7 +899,7 @@ function HomeScreen(props) {
       <Modal open={manualOpen} onClose={() => setManualOpen(false)} title="Add time manually">
         <label className="text-xs text-gray-400">Log</label>
         <select value={manualLogId} onChange={e => setManualLogId(e.target.value)} className="w-full border border-neutral-700 bg-neutral-900 text-gray-100 rounded-lg px-3 py-2 text-sm placeholder:text-gray-500 mb-3 mt-1">
-          {data.logs.map(l => <option key={l.id} value={l.id}>{l.parentId ? `— ${l.name}` : l.name}</option>)}
+          {data.logs.filter(l => !l.archived).map(l => <option key={l.id} value={l.id}>{l.parentId ? `— ${l.name}` : l.name}</option>)}
         </select>
         <label className="text-xs text-gray-400">Date</label>
         <input type="date" value={manualDate} onChange={e => setManualDate(e.target.value)} className="w-full border border-neutral-700 bg-neutral-900 text-gray-100 rounded-lg px-3 py-2 text-sm placeholder:text-gray-500 mb-3 mt-1" />
