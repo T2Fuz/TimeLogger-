@@ -289,6 +289,14 @@ export default function App() {
     setNewLogName(""); setAddLogOpen(false);
     setSubLogName(""); setSubLogOpen(false);
   }
+  function setLogParent(id, newParentId) {
+    // Guard against creating a cycle (can't move a log under one of its own
+    // descendants) — only top-level logs are offered as targets in the UI
+    // anyway, but this keeps the data safe if that ever changes.
+    if (newParentId === id) return;
+    scheduleSave({ ...data, logs: data.logs.map(l => l.id === id ? { ...l, parentId: newParentId || null } : l) });
+    setLogMenuId(null);
+  }
   function renameLog(id, name) {
     if (!name.trim()) return;
     scheduleSave({ ...data, logs: data.logs.map(l => l.id === id ? { ...l, name: name.trim() } : l) });
@@ -464,7 +472,7 @@ export default function App() {
           logMenuId={logMenuId} setLogMenuId={setLogMenuId}
           renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal}
           renameLog={renameLog} deleteLog={deleteLog} moveLog={moveLog}
-          colorPickerId={colorPickerId} setColorPickerId={setColorPickerId} setLogColor={setLogColor} setLogColorLive={setLogColorLive}
+          colorPickerId={colorPickerId} setColorPickerId={setColorPickerId} setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent}
           setLogNote={setLogNote}
           expandedId={expandedId} setExpandedId={setExpandedId}
           subLogOpen={subLogOpen} setSubLogOpen={setSubLogOpen}
@@ -590,7 +598,8 @@ function ColorWheel({ color, onChange }) {
 
 function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
   renameId, setRenameId, renameVal, setRenameVal, renameLog,
-  logMenuId, setLogMenuId, colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogNote, deleteLog, moveLog,
+  logMenuId, setLogMenuId, colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogParent, setLogNote, deleteLog, moveLog,
+  allLogs,
   isChild, isExpanded, onToggleExpand }) {
   const isActive = activeTimer && activeTimer.logId === log.id;
   const idx = siblings.findIndex(l => l.id === log.id);
@@ -598,6 +607,9 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
   const todayNote = hasDatedNotes ? (log.notesByDate[todayKey()] || "") : (log.note || "");
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState(todayNote);
+  const [moveMenuOpen, setMoveMenuOpen] = useState(false);
+  const moveTargets = (allLogs || []).filter(l => !l.parentId && l.id !== log.id);
+  const hasOwnChildren = (allLogs || []).some(l => l.parentId === log.id);
 
   function openNote() {
     setNoteDraft(todayNote);
@@ -660,6 +672,32 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
                 <ColorWheel color={log.color} onChange={(hex) => setLogColorLive(log.id, hex)} />
               </div>
             )}
+            {!hasOwnChildren && (
+              <button onClick={() => setMoveMenuOpen(o => !o)} className="flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-neutral-800 w-full">
+                <ChevronRight size={14} />Move to…
+              </button>
+            )}
+            {hasOwnChildren && (
+              <div className="px-4 py-2 text-[10px] text-gray-600">Has sub-logs of its own, so it can't be moved under another log.</div>
+            )}
+            {moveMenuOpen && !hasOwnChildren && (
+              <div className="max-h-40 overflow-y-auto border-t border-neutral-800">
+                {log.parentId && (
+                  <button onClick={() => setLogParent(log.id, null)} className="flex items-center gap-2 px-6 py-2 text-xs text-gray-400 hover:bg-neutral-800 w-full">
+                    Make top-level log
+                  </button>
+                )}
+                {moveTargets.length === 0 && !log.parentId && (
+                  <div className="px-6 py-2 text-xs text-gray-500">No other top-level logs yet</div>
+                )}
+                {moveTargets.map(t => (
+                  <button key={t.id} onClick={() => setLogParent(log.id, t.id)} className="flex items-center gap-2 px-6 py-2 text-xs text-gray-300 hover:bg-neutral-800 w-full">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
+                    Sub-log of {t.name}
+                  </button>
+                ))}
+              </div>
+            )}
             <button onClick={() => deleteLog(log.id)} className="flex items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-neutral-800 w-full"><Trash2 size={14} />Delete</button>
           </div>
         )}
@@ -691,7 +729,7 @@ function HomeScreen(props) {
     data, activeTimer, toggleLog, currentFocus, todayTotal, logTodayTotal,
     homeTab, setHomeTab, addLogOpen, setAddLogOpen, newLogName, setNewLogName, addLog,
     logMenuId, setLogMenuId, renameId, setRenameId, renameVal, setRenameVal, renameLog, deleteLog, moveLog,
-    colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogNote,
+    colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogParent, setLogNote,
     expandedId, setExpandedId, subLogOpen, setSubLogOpen, subLogParentId, setSubLogParentId, subLogName, setSubLogName,
     isOnline, user, syncing, setSkippedLogin, settingsOpen, setSettingsOpen, onExport, onImport,
     manualOpen, setManualOpen, manualLogId, setManualLogId, manualDate, setManualDate,
@@ -741,7 +779,8 @@ function HomeScreen(props) {
                   siblings={topLevelLogs}
                   renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                   logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
-                  setLogColor={setLogColor} setLogColorLive={setLogColorLive} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote}
+                  setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote}
+                  allLogs={data.logs}
                   isExpanded={isExpanded} onToggleExpand={() => setExpandedId(isExpanded ? null : log.id)}
                 />
                 {isExpanded && (
@@ -753,7 +792,8 @@ function HomeScreen(props) {
                         siblings={children} isChild
                         renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                         logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
-                        setLogColor={setLogColor} setLogColorLive={setLogColorLive} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote}
+                        setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote}
+                        allLogs={data.logs}
                       />
                     ))}
                     <div className="pl-10 pr-5 py-2.5 bg-neutral-950/40 border-b border-neutral-800">
