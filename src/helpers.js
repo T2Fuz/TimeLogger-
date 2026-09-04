@@ -125,6 +125,29 @@ export function minutesToClock(mins) {
 }
 export function todayKey() { return dateKey(new Date()); }
 export function addDays(d, n) { const dt = new Date(d); dt.setDate(dt.getDate() + n); return dt; }
+
+// Consecutive-day streak for a single log against a daily goal (in seconds).
+// Counts today only if it already meets the goal — an in-progress day that
+// hasn't hit the goal yet doesn't break a streak built on earlier days.
+export function computeStreak(sessions, logId, goalSeconds) {
+  if (!goalSeconds || goalSeconds <= 0) return 0;
+  const totals = {};
+  sessions.forEach(s => {
+    if (s.logId !== logId) return;
+    totals[s.date] = (totals[s.date] || 0) + s.duration;
+  });
+  let streak = 0;
+  let cursor = new Date();
+  const todayStr = dateKey(cursor);
+  if ((totals[todayStr] || 0) >= goalSeconds) { streak++; }
+  cursor = addDays(cursor, -1);
+  while (true) {
+    const k = dateKey(cursor);
+    if ((totals[k] || 0) >= goalSeconds) { streak++; cursor = addDays(cursor, -1); }
+    else break;
+  }
+  return streak;
+}
 export function startOfWeek(d) {
   const dt = new Date(d); const day = (dt.getDay() + 6) % 7;
   dt.setDate(dt.getDate() - day); dt.setHours(0, 0, 0, 0); return dt;

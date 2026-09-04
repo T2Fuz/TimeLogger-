@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } fro
 import {
   Play, Pause, Plus, X, Check, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Trash2,
   Download, Upload, Home as HomeIcon, CheckSquare, Calendar as CalendarIcon,
-  Cloud, CloudOff, Loader2, Pencil, Flag, StickyNote, LogOut, Settings as SettingsIcon
+  Cloud, CloudOff, Loader2, Pencil, Flag, StickyNote, LogOut, Settings as SettingsIcon, Flame
 } from "lucide-react";
 import { logout, watchAuth, signUpWithUsername, signInWithUsername, loadCloudData, saveCloudData, watchCloudData, setCloudActiveTimer, watchCloudActiveTimer } from "./firebase";
 
@@ -11,7 +11,7 @@ import {
   hslToHex, satOf, hueOf, hsbToHex, hexToHsb, isValidHex, rootLogId, uid, pad,
   fmtHMS, fmtHM, updateAppSettings, fmtClock, fmtAMPM, dateKey, logicalMinutes,
   minutesToClock, todayKey, addDays, startOfWeek, weekdayIdx,
-  WEEKDAYS, WEEKDAYS_SHORT3, MONTHS, MONTHS_LONG, fmtLongDate, defaultData,
+  WEEKDAYS, WEEKDAYS_SHORT3, MONTHS, MONTHS_LONG, fmtLongDate, defaultData, computeStreak,
 } from "./helpers.js";
 import { SessionRow, GroupedSessionList } from "./SessionViews.jsx";
 // Statistics uses recharts (the app's single heaviest dependency) — loading
@@ -125,6 +125,7 @@ export default function App() {
   const [subLogParentId, setSubLogParentId] = useState(null);
   const [subLogName, setSubLogName] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [celebration, setCelebration] = useState(null); // { name, color, streak } | null
 
   // ---------- auth ----------
   useEffect(() => watchAuth(setUser), []);
@@ -272,6 +273,7 @@ export default function App() {
           const session = { id: uid(), logId: prev.logId, date: dateKey(prev.startedAt), start: prev.startedAt, end: endedAt, duration };
           const nextData = { ...dataRef.current, sessions: [...dataRef.current.sessions, session] };
           scheduleSave(nextData);
+          checkStreakCelebration(session, nextData.sessions);
         }
         next = prev.logId === logId ? null : { logId, startedAt: Date.now() };
       } else {
@@ -280,6 +282,24 @@ export default function App() {
       if (user) setCloudActiveTimer(user.uid, next).catch(() => {});
       return next;
     });
+  }
+
+  // Fires the Duolingo-style celebration once per log per day, the moment
+  // that log's total for today first reaches its streak goal.
+  const celebratedRef = useRef(new Set());
+  function checkStreakCelebration(newSession, allSessions) {
+    const logId = newSession.logId;
+    const log = dataRef.current.logs.find(l => l.id === logId);
+    if (!log || !log.streakGoalSec) return;
+    const key = `${todayKey()}-${logId}`;
+    if (celebratedRef.current.has(key)) return;
+    const todaysTotal = allSessions.filter(s => s.logId === logId && s.date === newSession.date).reduce((a, s) => a + s.duration, 0);
+    if (todaysTotal < log.streakGoalSec) return;
+    const beforeThisSession = todaysTotal - newSession.duration;
+    if (beforeThisSession >= log.streakGoalSec) { celebratedRef.current.add(key); return; } // already celebrated earlier today
+    celebratedRef.current.add(key);
+    const streakCount = computeStreak(allSessions, logId, log.streakGoalSec);
+    setCelebration({ name: log.name, color: log.color, streak: streakCount });
   }
 
   function addLog(name, parentId = null) {
@@ -316,6 +336,14 @@ export default function App() {
     scheduleSave({
       ...data,
       logs: data.logs.map(l => l.id === id ? { ...l, notesByDate: { ...(l.notesByDate || {}), [key]: note } } : l),
+    });
+  }
+  // goalSeconds of 0/null clears the goal (and its streak, since there's
+  // nothing to measure against anymore).
+  function setLogStreakGoal(id, goalSeconds) {
+    scheduleSave({
+      ...data,
+      logs: data.logs.map(l => l.id === id ? { ...l, streakGoalSec: goalSeconds || null } : l),
     });
   }
   function deleteLog(id) {
@@ -356,7 +384,9 @@ export default function App() {
     }
     if (duration <= 0) return;
     const session = { id: uid(), logId: manualLogId, date: manualDate, start: startTs, end: endTs, duration };
-    scheduleSave({ ...dataRef.current, sessions: [...dataRef.current.sessions, session] });
+    const nextData = { ...dataRef.current, sessions: [...dataRef.current.sessions, session] };
+    scheduleSave(nextData);
+    checkStreakCelebration(session, nextData.sessions);
     setManualOpen(false);
   }
 
@@ -478,7 +508,7 @@ export default function App() {
           renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal}
           renameLog={renameLog} deleteLog={deleteLog} moveLog={moveLog}
           colorPickerId={colorPickerId} setColorPickerId={setColorPickerId} setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent}
-          setLogNote={setLogNote}
+          setLogNote={setLogNote} setLogStreakGoal={setLogStreakGoal}
           expandedId={expandedId} setExpandedId={setExpandedId}
           subLogOpen={subLogOpen} setSubLogOpen={setSubLogOpen}
           subLogParentId={subLogParentId} setSubLogParentId={setSubLogParentId}
@@ -493,6 +523,27 @@ export default function App() {
       {nav === "calendar" && <CalendarScreen data={data} activeTimer={activeTimer} currentFocus={currentFocus} scheduleSave={scheduleSave} />}
 
       <BottomNav nav={nav} setNav={setNav} />
+
+      <StreakCelebration celebration={celebration} onClose={() => setCelebration(null)} />
+    </div>
+  );
+}
+
+function StreakCelebration({ celebration, onClose }) {
+  if (!celebration) return null;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 px-6" onClick={onClose}>
+      <div className="bg-neutral-900 rounded-3xl px-6 py-8 max-w-xs w-full text-center shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="relative w-28 h-28 mx-auto mb-5 flex items-center justify-center">
+          <div className="absolute inset-0 rounded-full opacity-20" style={{ backgroundColor: celebration.color }} />
+          <Flame size={64} className="fill-orange-400 text-orange-400" style={{ filter: "drop-shadow(0 0 12px rgba(255,138,42,0.6))" }} />
+        </div>
+        <div className="text-3xl font-extrabold text-white mb-1">{celebration.streak} Day{celebration.streak === 1 ? "" : "s"} Streak!</div>
+        <p className="text-sm text-gray-400 mb-6">You hit your daily goal for <span className="text-gray-200 font-medium">{celebration.name}</span> — keep it up!</p>
+        <button onClick={onClose} className="w-full bg-orange-500 hover:bg-orange-600 text-white rounded-xl py-3 text-sm font-semibold">
+          Continue
+        </button>
+      </div>
     </div>
   );
 }
@@ -603,13 +654,17 @@ function ColorWheel({ color, onChange }) {
 
 function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
   renameId, setRenameId, renameVal, setRenameVal, renameLog,
-  logMenuId, setLogMenuId, colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogParent, setLogNote, deleteLog, moveLog,
-  allLogs,
+  logMenuId, setLogMenuId, colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogParent, setLogNote, setLogStreakGoal, deleteLog, moveLog,
+  allLogs, sessions,
   isChild, isExpanded, onToggleExpand }) {
   const isActive = activeTimer && activeTimer.logId === log.id;
   const idx = siblings.findIndex(l => l.id === log.id);
   const hasDatedNotes = !!log.notesByDate;
   const todayNote = hasDatedNotes ? (log.notesByDate[todayKey()] || "") : (log.note || "");
+  const streakCount = log.streakGoalSec ? computeStreak(sessions || [], log.id, log.streakGoalSec) : 0;
+  const [goalMenuOpen, setGoalMenuOpen] = useState(false);
+  const [goalH, setGoalH] = useState(String(Math.floor((log.streakGoalSec || 0) / 3600)));
+  const [goalM, setGoalM] = useState(String(Math.floor(((log.streakGoalSec || 0) % 3600) / 60)));
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState(todayNote);
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
@@ -651,6 +706,11 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
             </>
           )}
         </div>
+        {streakCount > 0 && (
+          <span className="flex items-center gap-0.5 text-[11px] text-orange-400 font-semibold shrink-0" title={`${streakCount}-day streak`}>
+            <Flame size={12} className="fill-orange-400" />{streakCount}
+          </span>
+        )}
         <span className={`text-sm tabular-nums ${isActive ? "text-orange-400 font-semibold" : "text-gray-400"}`}>{fmtHMS(logTodayTotal(log.id))}</span>
         <button onClick={() => (noteOpen ? setNoteOpen(false) : openNote())} className={`p-1 shrink-0 ${todayNote ? "text-orange-400" : "text-gray-500"} hover:text-orange-400`}>
           <StickyNote size={15} />
@@ -703,6 +763,30 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
                 ))}
               </div>
             )}
+            <button onClick={() => setGoalMenuOpen(o => !o)} className="flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-neutral-800 w-full">
+              <Flame size={14} />Streak goal{log.streakGoalSec ? ` (${fmtHM(log.streakGoalSec)})` : ""}
+            </button>
+            {goalMenuOpen && (
+              <div className="px-4 pb-3 pt-1 border-t border-neutral-800">
+                <p className="text-[10px] text-gray-500 mb-2">Hit this much time on this log every day to build a streak.</p>
+                <div className="flex gap-2 items-center mb-2">
+                  <input type="number" min="0" value={goalH} onChange={e => setGoalH(e.target.value)}
+                    className="w-14 bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs text-center" />
+                  <span className="text-gray-500 text-xs">h</span>
+                  <input type="number" min="0" max="59" value={goalM} onChange={e => setGoalM(e.target.value)}
+                    className="w-14 bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs text-center" />
+                  <span className="text-gray-500 text-xs">m</span>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setLogStreakGoal(log.id, (parseInt(goalH || "0", 10) * 3600) + (parseInt(goalM || "0", 10) * 60)); setGoalMenuOpen(false); }}
+                    className="bg-orange-500 text-white rounded-lg px-3 py-1 text-xs font-medium">Save</button>
+                  {log.streakGoalSec > 0 && (
+                    <button onClick={() => { setLogStreakGoal(log.id, 0); setGoalH("0"); setGoalM("0"); setGoalMenuOpen(false); }} className="text-red-400 text-xs">Remove goal</button>
+                  )}
+                </div>
+              </div>
+            )}
             <button onClick={() => deleteLog(log.id)} className="flex items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-neutral-800 w-full"><Trash2 size={14} />Delete</button>
           </div>
         )}
@@ -734,7 +818,7 @@ function HomeScreen(props) {
     data, activeTimer, toggleLog, currentFocus, todayTotal, logTodayTotal,
     homeTab, setHomeTab, addLogOpen, setAddLogOpen, newLogName, setNewLogName, addLog,
     logMenuId, setLogMenuId, renameId, setRenameId, renameVal, setRenameVal, renameLog, deleteLog, moveLog,
-    colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogParent, setLogNote,
+    colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogParent, setLogNote, setLogStreakGoal,
     expandedId, setExpandedId, subLogOpen, setSubLogOpen, subLogParentId, setSubLogParentId, subLogName, setSubLogName,
     isOnline, user, syncing, setSkippedLogin, settingsOpen, setSettingsOpen, onExport, onImport,
     manualOpen, setManualOpen, manualLogId, setManualLogId, manualDate, setManualDate,
@@ -784,8 +868,8 @@ function HomeScreen(props) {
                   siblings={topLevelLogs}
                   renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                   logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
-                  setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote}
-                  allLogs={data.logs}
+                  setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote} setLogStreakGoal={setLogStreakGoal}
+                  allLogs={data.logs} sessions={data.sessions}
                   isExpanded={isExpanded} onToggleExpand={() => setExpandedId(isExpanded ? null : log.id)}
                 />
                 {isExpanded && (
@@ -797,8 +881,8 @@ function HomeScreen(props) {
                         siblings={children} isChild
                         renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                         logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
-                        setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote}
-                        allLogs={data.logs}
+                        setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote} setLogStreakGoal={setLogStreakGoal}
+                        allLogs={data.logs} sessions={data.sessions}
                       />
                     ))}
                     <div className="pl-10 pr-5 py-2.5 bg-neutral-950/40 border-b border-neutral-800">
