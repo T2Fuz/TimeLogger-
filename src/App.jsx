@@ -14,6 +14,7 @@ import {
   WEEKDAYS, WEEKDAYS_SHORT3, MONTHS, MONTHS_LONG, fmtLongDate, defaultData, computeStreak,
 } from "./helpers.js";
 import { SessionRow, GroupedSessionList } from "./SessionViews.jsx";
+import { StoryGate, StoryHistoryModal } from "./ComebackStory.jsx";
 // Statistics uses recharts (the app's single heaviest dependency) — loading
 // it lazily means it's only downloaded when the person actually opens the
 // Statistics tab, instead of on every app open. This is the main fix for
@@ -125,6 +126,7 @@ export default function App() {
   const [subLogParentId, setSubLogParentId] = useState(null);
   const [subLogName, setSubLogName] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [storyHistoryOpen, setStoryHistoryOpen] = useState(false);
   const [celebration, setCelebration] = useState(null); // { name, color, streak } | null
 
   // ---------- auth ----------
@@ -262,6 +264,14 @@ export default function App() {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [activeTimer]);
+
+  // A slower independent tick (no active timer required) so the comeback-story
+  // gate notices its scheduled time passing even if the person just has the
+  // app sitting open without a timer running.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
 
   function toggleLog(logId) {
     setActiveTimer((prev) => {
@@ -515,6 +525,7 @@ export default function App() {
           subLogName={subLogName} setSubLogName={setSubLogName}
           isOnline={isOnline} user={user} syncing={syncing} setSkippedLogin={setSkippedLogin}
           settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen}
+          setStoryHistoryOpen={setStoryHistoryOpen}
           onExport={handleExport} onImport={handleImport}
           now={now}
         />
@@ -525,6 +536,8 @@ export default function App() {
       <BottomNav nav={nav} setNav={setNav} />
 
       <StreakCelebration celebration={celebration} onClose={() => setCelebration(null)} />
+      <StoryGate data={data} scheduleSave={scheduleSave} now={now} />
+      <StoryHistoryModal open={storyHistoryOpen} onClose={() => setStoryHistoryOpen(false)} story={data.story} />
     </div>
   );
 }
@@ -942,6 +955,28 @@ function HomeScreen(props) {
               <option key={h} value={h}>{h === 0 ? "12:00 AM (midnight)" : h < 12 ? `${h}:00 AM` : h === 12 ? "12:00 PM (noon)" : `${h - 12}:00 PM`}</option>
             ))}
           </select>
+        </div>
+
+        <div className="mt-5 pt-4 border-t border-neutral-800">
+          <label className="text-xs text-gray-400 block mb-2">Comeback story time</label>
+          <p className="text-[11px] text-gray-500 mb-2">Once you open the app at or after this time each day, a comeback story pops up — read the whole thing (up to a minute) before it lets you close it.</p>
+          <div className="flex gap-2 mb-2">
+            <select
+              value={data.settings?.storyHour ?? 8}
+              onChange={e => props.scheduleSave({ ...data, settings: { ...(data.settings || {}), storyHour: Number(e.target.value) } })}
+              className="flex-1 border border-neutral-700 bg-neutral-900 text-gray-100 rounded-lg px-3 py-2 text-sm">
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>{h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`}</option>
+              ))}
+            </select>
+            <select
+              value={data.settings?.storyMinute ?? 0}
+              onChange={e => props.scheduleSave({ ...data, settings: { ...(data.settings || {}), storyMinute: Number(e.target.value) } })}
+              className="w-20 border border-neutral-700 bg-neutral-900 text-gray-100 rounded-lg px-3 py-2 text-sm">
+              {[0, 15, 30, 45].map(m => <option key={m} value={m}>:{pad(m)}</option>)}
+            </select>
+          </div>
+          <button onClick={() => props.setStoryHistoryOpen(true)} className="text-xs text-orange-400 underline">View past stories</button>
         </div>
 
         {data.logs.some(l => l.archived) && (

@@ -163,6 +163,24 @@ export function fmtLongDate(d) {
 export const MONTHS_LONG = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 export function defaultData() {
-  return { logs: [], sessions: [], todos: [], planner: [], dday: { label: "D-DAY", date: null }, settings: { timeFormat: "24h", dayResetHour: 3 } };
+  return {
+    logs: [], sessions: [], todos: [], planner: [], dday: { label: "D-DAY", date: null },
+    settings: { timeFormat: "24h", dayResetHour: 3, storyHour: 8, storyMinute: 0 },
+    // Comeback-story feature: lastShownDate is the plain calendar date (not the
+    // logical/reset-hour day) the story was last completed on. pendingDate is
+    // set when a story is due but hasn't been fetched/shown yet (e.g. no
+    // internet) — the app keeps retrying on every open until it succeeds.
+    // usedIds rotates through STORY_SUBJECTS without repeats; history keeps
+    // every story ever shown so it can be revisited later.
+    story: { lastShownDate: null, pendingDate: null, usedIds: [], history: [] },
+  };
+}
+
+// Plain calendar date (device-local, NOT affected by dayResetHour) — the
+// comeback-story feature runs on its own clock (storyHour/storyMinute),
+// separate from the logging day.
+export function calendarDateKey(d = new Date()) {
+  const dt = new Date(d);
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
 }
 
