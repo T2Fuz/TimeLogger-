@@ -1239,7 +1239,7 @@ function CalendarScreen({ data, activeTimer, currentFocus, scheduleSave }) {
       <div className="mt-5">
         <div className="text-sm font-semibold text-gray-100 mb-2">{selected} · {fmtHM(dayTotals[selected] || 0)}h logged</div>
         {selSessions.length === 0 && selTodos.length === 0 && <div className="text-gray-500 text-sm py-4">Nothing logged for this day.</div>}
-        <GroupedSessionList sessions={selSessions} data={data} scheduleSave={scheduleSave} />
+        <GroupedSessionList sessions={selSessions} data={data} scheduleSave={scheduleSave} selected={selected} />
         <div className="space-y-1.5 mt-1.5">
           {selTodos.map(t => (
             <div key={t.id} className="flex items-center gap-2 bg-blue-500/10 rounded-lg px-3 py-2 text-sm">

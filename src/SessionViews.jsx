@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { Pencil, ChevronDown, ChevronRight } from "lucide-react";
 import { fmtClock, fmtHMS, rootLogId } from "./helpers.js";
 
-export function SessionRow({ session, data, scheduleSave }) {
+export function SessionRow({ session, data, scheduleSave, note }) {
   const [editing, setEditing] = useState(false);
   const [mode, setMode] = useState("range"); // "range" | "duration"
   const [date, setDate] = useState(session.date);
@@ -76,17 +76,20 @@ export function SessionRow({ session, data, scheduleSave }) {
   }
 
   return (
-    <div className="flex items-center gap-2 bg-neutral-900 rounded-lg px-3 py-2 text-sm shadow-sm">
-      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: log?.color || "#999" }} />
-      <span className="flex-1 text-gray-300">{log?.name || "Deleted log"}</span>
-      <span className="text-gray-500 text-xs">{fmtClock(session.start)}–{fmtClock(session.end)}</span>
-      <span className="text-gray-300 text-xs font-medium">{fmtHMS(session.duration)}</span>
-      <button onClick={() => setEditing(true)} className="text-gray-500 hover:text-orange-400 shrink-0"><Pencil size={13} /></button>
+    <div className="bg-neutral-900 rounded-lg px-3 py-2 text-sm shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: log?.color || "#999" }} />
+        <span className="flex-1 text-gray-300">{log?.name || "Deleted log"}</span>
+        <span className="text-gray-500 text-xs">{fmtClock(session.start)}–{fmtClock(session.end)}</span>
+        <span className="text-gray-300 text-xs font-medium">{fmtHMS(session.duration)}</span>
+        <button onClick={() => setEditing(true)} className="text-gray-500 hover:text-orange-400 shrink-0"><Pencil size={13} /></button>
+      </div>
+      {note && <div className="text-xs text-gray-500 mt-1 pl-5 whitespace-pre-wrap">{note}</div>}
     </div>
   );
 }
 
-export function GroupedSessionList({ sessions, data, scheduleSave }) {
+export function GroupedSessionList({ sessions, data, scheduleSave, selected }) {
   const [expanded, setExpanded] = useState({});
   const groups = useMemo(() => {
     // Group by the top-level ancestor log, not the exact log a session was
@@ -110,8 +113,12 @@ export function GroupedSessionList({ sessions, data, scheduleSave }) {
   return (
     <div className="space-y-1.5">
       {groups.map(g => {
+        // Notes are stored per top-level log per day, not per individual
+        // session — this is the note (if any) written for this log on the
+        // day being viewed (e.g. while its timer was running).
+        const note = selected ? g.log?.notesByDate?.[selected] : null;
         if (g.list.length === 1) {
-          return <SessionRow key={g.logId} session={g.list[0]} data={data} scheduleSave={scheduleSave} />;
+          return <SessionRow key={g.logId} session={g.list[0]} data={data} scheduleSave={scheduleSave} note={note} />;
         }
         const isOpen = !!expanded[g.logId];
         return (
@@ -124,6 +131,7 @@ export function GroupedSessionList({ sessions, data, scheduleSave }) {
               <span className="text-gray-300 text-xs font-medium">{fmtHMS(g.total)}</span>
               {isOpen ? <ChevronDown size={14} className="text-gray-500" /> : <ChevronRight size={14} className="text-gray-500" />}
             </button>
+            {note && <div className="text-xs text-gray-500 px-3 pb-2 -mt-1 pl-8 whitespace-pre-wrap">{note}</div>}
             {isOpen && (
               <div className="px-2 pb-2 space-y-1">
                 {g.list.map(s => <SessionRow key={s.id} session={s} data={data} scheduleSave={scheduleSave} />)}
