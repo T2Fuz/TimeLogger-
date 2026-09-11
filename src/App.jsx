@@ -536,8 +536,9 @@ export default function App() {
       <BottomNav nav={nav} setNav={setNav} />
 
       <StreakCelebration celebration={celebration} onClose={() => setCelebration(null)} />
-      <StoryGate data={data} scheduleSave={scheduleSave} now={now} />
-      <StoryHistoryModal open={storyHistoryOpen} onClose={() => setStoryHistoryOpen(false)} story={data.story} />
+      {/* Comeback story feature disabled for now — flip back on by uncommenting.
+      <StoryGate data={data} scheduleSave={scheduleSave} now={now} /> */}
+      {/* <StoryHistoryModal open={storyHistoryOpen} onClose={() => setStoryHistoryOpen(false)} story={data.story} /> */}
     </div>
   );
 }
@@ -957,6 +958,7 @@ function HomeScreen(props) {
           </select>
         </div>
 
+        {/* Comeback story settings hidden while the feature is disabled — see StoryGate above.
         <div className="mt-5 pt-4 border-t border-neutral-800">
           <label className="text-xs text-gray-400 block mb-2">Comeback story time</label>
           <p className="text-[11px] text-gray-500 mb-2">Once you open the app at or after this time each day, a comeback story pops up — read the whole thing (up to a minute) before it lets you close it.</p>
@@ -978,6 +980,7 @@ function HomeScreen(props) {
           </div>
           <button onClick={() => props.setStoryHistoryOpen(true)} className="text-xs text-orange-400 underline">View past stories</button>
         </div>
+        */}
 
         {data.logs.some(l => l.archived) && (
           <div className="mt-5 pt-4 border-t border-neutral-800">
@@ -1239,7 +1242,7 @@ function CalendarScreen({ data, activeTimer, currentFocus, scheduleSave }) {
       <div className="mt-5">
         <div className="text-sm font-semibold text-gray-100 mb-2">{selected} · {fmtHM(dayTotals[selected] || 0)}h logged</div>
         {selSessions.length === 0 && selTodos.length === 0 && <div className="text-gray-500 text-sm py-4">Nothing logged for this day.</div>}
-        <GroupedSessionList sessions={selSessions} data={data} scheduleSave={scheduleSave} />
+        <GroupedSessionList sessions={selSessions} data={data} scheduleSave={scheduleSave} dateKey={selected} />
         <div className="space-y-1.5 mt-1.5">
           {selTodos.map(t => (
             <div key={t.id} className="flex items-center gap-2 bg-blue-500/10 rounded-lg px-3 py-2 text-sm">

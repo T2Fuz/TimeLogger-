@@ -496,39 +496,9 @@ function DayStats({ data, activeTimer, now, scheduleSave }) {
 
       <Card>
         <div className="text-sm font-semibold text-gray-300 mb-2">{selected} · {fmtHM(dayTotals[selected] || 0)}h</div>
-        <GroupedSessionList sessions={selSessions} data={data} scheduleSave={scheduleSave} />
+        <GroupedSessionList sessions={selSessions} data={data} scheduleSave={scheduleSave} dateKey={selected} />
       </Card>
-
-      <DayNotes data={data} selected={selected} />
     </div>
-  );
-}
-
-// Notes are stored per-log under notesByDate[dateKey], keyed to the app's
-// logical day (see helpers.dateKey / dayResetHour), so they already survive
-// the daily reset — they just weren't shown anywhere once "today" moved on.
-// This surfaces whatever was written for the selected day.
-function DayNotes({ data, selected }) {
-  const notedLogs = data.logs
-    .map(l => ({ log: l, note: l.notesByDate?.[selected] }))
-    .filter(x => x.note && x.note.trim());
-
-  if (notedLogs.length === 0) return null;
-
-  return (
-    <Card title="Notes">
-      <div className="space-y-3">
-        {notedLogs.map(({ log, note }) => (
-          <div key={log.id} className="flex gap-2">
-            <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ backgroundColor: log.color || "#FF8A2A" }} />
-            <div>
-              <div className="text-xs font-medium text-gray-300">{log.name}</div>
-              <div className="text-xs text-gray-500 whitespace-pre-wrap">{note}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </Card>
   );
 }
 

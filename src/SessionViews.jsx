@@ -1,8 +1,17 @@
 import { useState, useMemo } from "react";
 import { Pencil, ChevronDown, ChevronRight } from "lucide-react";
-import { fmtClock, fmtHMS, rootLogId } from "./helpers.js";
+import { fmtClock, fmtHMS, rootLogId, todayKey } from "./helpers.js";
 
-export function SessionRow({ session, data, scheduleSave }) {
+// A log's note for a given day: dated notes take priority; for logs that
+// predate the dated-notes feature, fall back to the old single `note` field
+// but only when we're looking at today (it has no date attached).
+function noteFor(log, dateKey) {
+  if (!log) return "";
+  if (log.notesByDate) return log.notesByDate[dateKey] || "";
+  return dateKey === todayKey() ? (log.note || "") : "";
+}
+
+export function SessionRow({ session, data, scheduleSave, dateKey }) {
   const [editing, setEditing] = useState(false);
   const [mode, setMode] = useState("range"); // "range" | "duration"
   const [date, setDate] = useState(session.date);
@@ -75,18 +84,28 @@ export function SessionRow({ session, data, scheduleSave }) {
     );
   }
 
+  const note = noteFor(log, dateKey);
+
   return (
-    <div className="flex items-center gap-2 bg-neutral-900 rounded-lg px-3 py-2 text-sm shadow-sm">
-      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: log?.color || "#999" }} />
-      <span className="flex-1 text-gray-300">{log?.name || "Deleted log"}</span>
-      <span className="text-gray-500 text-xs">{fmtClock(session.start)}–{fmtClock(session.end)}</span>
-      <span className="text-gray-300 text-xs font-medium">{fmtHMS(session.duration)}</span>
-      <button onClick={() => setEditing(true)} className="text-gray-500 hover:text-orange-400 shrink-0"><Pencil size={13} /></button>
+    <div className="bg-neutral-900 rounded-lg px-3 py-2 text-sm shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: log?.color || "#999" }} />
+        <span className="flex-1 text-gray-300">{log?.name || "Deleted log"}</span>
+        <span className="text-gray-500 text-xs">{fmtClock(session.start)}–{fmtClock(session.end)}</span>
+        <span className="text-gray-300 text-xs font-medium">{fmtHMS(session.duration)}</span>
+        <button onClick={() => setEditing(true)} className="text-gray-500 hover:text-orange-400 shrink-0"><Pencil size={13} /></button>
+      </div>
+      {note && (
+        <div className="flex gap-2 mt-1.5 pt-1.5 border-t border-neutral-800">
+          <span className="w-2 h-2 rounded-full shrink-0 mt-1" style={{ backgroundColor: log?.color || "#999" }} />
+          <div className="text-xs text-gray-500 whitespace-pre-wrap">{note}</div>
+        </div>
+      )}
     </div>
   );
 }
 
-export function GroupedSessionList({ sessions, data, scheduleSave }) {
+export function GroupedSessionList({ sessions, data, scheduleSave, dateKey }) {
   const [expanded, setExpanded] = useState({});
   const groups = useMemo(() => {
     // Group by the top-level ancestor log, not the exact log a session was
@@ -111,9 +130,10 @@ export function GroupedSessionList({ sessions, data, scheduleSave }) {
     <div className="space-y-1.5">
       {groups.map(g => {
         if (g.list.length === 1) {
-          return <SessionRow key={g.logId} session={g.list[0]} data={data} scheduleSave={scheduleSave} />;
+          return <SessionRow key={g.logId} session={g.list[0]} data={data} scheduleSave={scheduleSave} dateKey={dateKey} />;
         }
         const isOpen = !!expanded[g.logId];
+        const groupNote = noteFor(g.log, dateKey);
         return (
           <div key={g.logId} className="bg-neutral-900 rounded-lg overflow-hidden">
             <button onClick={() => setExpanded(e => ({ ...e, [g.logId]: !e[g.logId] }))}
@@ -124,9 +144,15 @@ export function GroupedSessionList({ sessions, data, scheduleSave }) {
               <span className="text-gray-300 text-xs font-medium">{fmtHMS(g.total)}</span>
               {isOpen ? <ChevronDown size={14} className="text-gray-500" /> : <ChevronRight size={14} className="text-gray-500" />}
             </button>
+            {!isOpen && groupNote && (
+              <div className="flex gap-2 px-3 pb-2 -mt-1">
+                <span className="w-2 h-2 rounded-full shrink-0 mt-1" style={{ backgroundColor: g.log?.color || "#999" }} />
+                <div className="text-xs text-gray-500 whitespace-pre-wrap">{groupNote}</div>
+              </div>
+            )}
             {isOpen && (
               <div className="px-2 pb-2 space-y-1">
-                {g.list.map(s => <SessionRow key={s.id} session={s} data={data} scheduleSave={scheduleSave} />)}
+                {g.list.map(s => <SessionRow key={s.id} session={s} data={data} scheduleSave={scheduleSave} dateKey={dateKey} />)}
               </div>
             )}
           </div>
