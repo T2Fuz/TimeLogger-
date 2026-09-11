@@ -12,9 +12,11 @@ import {
   fmtHMS, fmtHM, updateAppSettings, fmtClock, fmtAMPM, dateKey, logicalMinutes,
   minutesToClock, todayKey, addDays, startOfWeek, weekdayIdx,
   WEEKDAYS, WEEKDAYS_SHORT3, MONTHS, MONTHS_LONG, fmtLongDate, defaultData, computeStreak,
+  applySessionEffects, detectBrokenStreak, RESTORE_XP_COST,
 } from "./helpers.js";
 import { SessionRow, GroupedSessionList } from "./SessionViews.jsx";
 import { StoryGate, StoryHistoryModal } from "./ComebackStory.jsx";
+import { XpSummary, StreakRestoreModal } from "./Xp.jsx";
 // Statistics uses recharts (the app's single heaviest dependency) — loading
 // it lazily means it's only downloaded when the person actually opens the
 // Statistics tab, instead of on every app open. This is the main fix for
@@ -273,6 +275,76 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
+  // Sweeps every streak-goal log once in a while, looking for a streak that
+  // broke yesterday, and flags it (log.brokenStreak) so the restore modal
+  // can offer to fix it. Cheap no-op once a day per log once already checked.
+  useEffect(() => {
+    const cur = dataRef.current;
+    let changed = false;
+    const logs = cur.logs.map(l => {
+      const next = detectBrokenStreak(l, cur.sessions, new Date(now));
+      if (next !== l) changed = true;
+      return next;
+    });
+    if (changed) scheduleSave({ ...cur, logs });
+  }, [now]);
+
+  const brokenStreakLog = data.logs.find(l => l.brokenStreak && !l.archived);
+
+  function resolveStreakRestore(logId, method) {
+    const log = dataRef.current.logs.find(l => l.id === logId);
+    if (!log || !log.brokenStreak) return;
+    const restoreDate = log.brokenStreak.date;
+    let nextData = dataRef.current;
+
+    if (method === "freeze" && (log.freezeTokens || 0) > 0) {
+      nextData = {
+        ...nextData,
+        logs: nextData.logs.map(l => l.id === logId ? {
+          ...l, freezeTokens: (l.freezeTokens || 0) - 1,
+          restoredDates: [...(l.restoredDates || []), restoreDate],
+          brokenStreak: null,
+        } : l),
+      };
+    } else if (method === "xp" && (nextData.xp?.spendable || 0) >= RESTORE_XP_COST) {
+      nextData = {
+        ...nextData,
+        xp: { ...nextData.xp, spendable: nextData.xp.spendable - RESTORE_XP_COST },
+        logs: nextData.logs.map(l => l.id === logId ? {
+          ...l, restoredDates: [...(l.restoredDates || []), restoreDate], brokenStreak: null,
+        } : l),
+      };
+    } else if (method === "catchup") {
+      nextData = {
+        ...nextData,
+        logs: nextData.logs.map(l => l.id === logId ? {
+          ...l,
+          catchUpTarget: { date: todayKey(), neededSeconds: (l.streakGoalSec || 0) * 2, restoreDate },
+          brokenStreak: null,
+        } : l),
+      };
+    } else if (method === "lifeline") {
+      nextData = {
+        ...nextData,
+        logs: nextData.logs.map(l => l.id === logId ? {
+          ...l, lastLifelineDate: todayKey(),
+          restoredDates: [...(l.restoredDates || []), restoreDate],
+          brokenStreak: null,
+        } : l),
+      };
+    } else {
+      return;
+    }
+    scheduleSave(nextData);
+  }
+
+  function dismissStreakRestore(logId) {
+    scheduleSave({
+      ...dataRef.current,
+      logs: dataRef.current.logs.map(l => l.id === logId ? { ...l, brokenStreak: null } : l),
+    });
+  }
+
   function toggleLog(logId) {
     setActiveTimer((prev) => {
       let next;
@@ -281,7 +353,7 @@ export default function App() {
         const duration = Math.round((endedAt - prev.startedAt) / 1000);
         if (duration > 0) {
           const session = { id: uid(), logId: prev.logId, date: dateKey(prev.startedAt), start: prev.startedAt, end: endedAt, duration };
-          const nextData = { ...dataRef.current, sessions: [...dataRef.current.sessions, session] };
+          const nextData = applySessionEffects(dataRef.current, session);
           scheduleSave(nextData);
           checkStreakCelebration(session, nextData.sessions);
         }
@@ -394,7 +466,7 @@ export default function App() {
     }
     if (duration <= 0) return;
     const session = { id: uid(), logId: manualLogId, date: manualDate, start: startTs, end: endTs, duration };
-    const nextData = { ...dataRef.current, sessions: [...dataRef.current.sessions, session] };
+    const nextData = applySessionEffects(dataRef.current, session);
     scheduleSave(nextData);
     checkStreakCelebration(session, nextData.sessions);
     setManualOpen(false);
@@ -536,6 +608,12 @@ export default function App() {
       <BottomNav nav={nav} setNav={setNav} />
 
       <StreakCelebration celebration={celebration} onClose={() => setCelebration(null)} />
+      <StreakRestoreModal
+        log={brokenStreakLog}
+        data={data}
+        onResolve={(method) => resolveStreakRestore(brokenStreakLog.id, method)}
+        onDismiss={() => dismissStreakRestore(brokenStreakLog.id)}
+      />
       {/* Comeback story feature disabled for now — flip back on by uncommenting.
       <StoryGate data={data} scheduleSave={scheduleSave} now={now} /> */}
       {/* <StoryHistoryModal open={storyHistoryOpen} onClose={() => setStoryHistoryOpen(false)} story={data.story} /> */}
@@ -957,6 +1035,8 @@ function HomeScreen(props) {
             ))}
           </select>
         </div>
+
+        <XpSummary data={data} />
 
         {/* Comeback story settings hidden while the feature is disabled — see StoryGate above.
         <div className="mt-5 pt-4 border-t border-neutral-800">

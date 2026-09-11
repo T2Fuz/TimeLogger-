@@ -129,21 +129,27 @@ export function addDays(d, n) { const dt = new Date(d); dt.setDate(dt.getDate() 
 // Consecutive-day streak for a single log against a daily goal (in seconds).
 // Counts today only if it already meets the goal — an in-progress day that
 // hasn't hit the goal yet doesn't break a streak built on earlier days.
-export function computeStreak(sessions, logId, goalSeconds) {
+// opts.restoredDates: a Set of dateKey strings that count as "hit" even
+// though the logged total didn't reach the goal (streak-restore feature).
+// opts.asOf: pretend "today" is this Date instead of the real now — used to
+// ask "what was the streak as of two days ago" when detecting a break.
+export function computeStreak(sessions, logId, goalSeconds, opts = {}) {
   if (!goalSeconds || goalSeconds <= 0) return 0;
+  const { restoredDates, asOf } = opts;
   const totals = {};
   sessions.forEach(s => {
     if (s.logId !== logId) return;
     totals[s.date] = (totals[s.date] || 0) + s.duration;
   });
+  const hit = (k) => (totals[k] || 0) >= goalSeconds || (restoredDates && restoredDates.has(k));
   let streak = 0;
-  let cursor = new Date();
+  let cursor = asOf ? new Date(asOf) : new Date();
   const todayStr = dateKey(cursor);
-  if ((totals[todayStr] || 0) >= goalSeconds) { streak++; }
+  if (hit(todayStr)) { streak++; }
   cursor = addDays(cursor, -1);
   while (true) {
     const k = dateKey(cursor);
-    if ((totals[k] || 0) >= goalSeconds) { streak++; cursor = addDays(cursor, -1); }
+    if (hit(k)) { streak++; cursor = addDays(cursor, -1); }
     else break;
   }
   return streak;
@@ -173,6 +179,10 @@ export function defaultData() {
     // usedIds rotates through STORY_SUBJECTS without repeats; history keeps
     // every story ever shown so it can be revisited later.
     story: { lastShownDate: null, pendingDate: null, usedIds: [], history: [] },
+    // XP: total is lifetime (drives level, never decreases), spendable is the
+    // balance streak-restores draw down. capDate/capEarned track today's
+    // earn-cap so a single day can't inflate level progress indefinitely.
+    xp: { total: 0, spendable: 0, capDate: null, capEarned: 0 },
   };
 }
 
@@ -182,5 +192,140 @@ export function defaultData() {
 export function calendarDateKey(d = new Date()) {
   const dt = new Date(d);
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+
+// ===================== XP + streak restore =====================
+// Design (see conversation): XP is a single global pool shared across all
+// logs. It drives two things — a Duolingo-style level (lifetime total,
+// never decreases) and a spendable balance that streak-restores draw down.
+// A daily cap keeps one very long logging day from inflating either.
+
+export const DAILY_XP_CAP = 300;
+export const XP_PER_10MIN = 5;
+export const DAILY_GOAL_BONUS_XP = 50;
+export const RESTORE_XP_COST = 200;
+export const MAX_FREEZE_TOKENS = 2;
+export const FREEZE_MINUTES_PER_TOKEN = 60;
+export const LIFELINE_COOLDOWN_DAYS = 30;
+
+export function xpForSeconds(sec) {
+  return Math.floor(Math.max(0, sec) / 600) * XP_PER_10MIN;
+}
+
+// Reading a streak's current length into a small multiplier so keeping a
+// streak alive keeps paying off, not just hitting the goal once.
+export function streakMultiplier(streakCount) {
+  if (streakCount >= 30) return 1.5;
+  if (streakCount >= 7) return 1.2;
+  return 1;
+}
+
+// level 1 -> 2 costs 100 XP, each next level costs ~1.3x more (cumulative,
+// based on lifetime total — spending XP on restores never drops your level).
+export function levelInfo(totalXp) {
+  let level = 1, need = 100, cumulative = 0;
+  const xp = Math.max(0, totalXp || 0);
+  while (xp >= cumulative + need) {
+    cumulative += need;
+    level++;
+    need = Math.round(need * 1.3);
+  }
+  return { level, xpIntoLevel: xp - cumulative, xpForNextLevel: need };
+}
+
+// Adds `gained` XP to the pool, respecting the daily earn-cap. Returns a new
+// xp object; never mutates the one passed in.
+export function applyXpGain(xp, gained, todayKeyStr = todayKey()) {
+  const base = xp || { total: 0, spendable: 0, capDate: null, capEarned: 0 };
+  const reset = base.capDate !== todayKeyStr;
+  const capEarned = reset ? 0 : (base.capEarned || 0);
+  const room = Math.max(0, DAILY_XP_CAP - capEarned);
+  const actual = Math.max(0, Math.min(gained, room));
+  return {
+    total: (base.total || 0) + actual,
+    spendable: (base.spendable || 0) + actual,
+    capDate: todayKeyStr,
+    capEarned: capEarned + actual,
+  };
+}
+
+// Freeze tokens accrue from logging extra time beyond the daily goal — every
+// FREEZE_MINUTES_PER_TOKEN minutes of overtime banks one, capped at
+// MAX_FREEZE_TOKENS. freezeCredit tracks how many of today's extra minutes
+// have already been converted, so re-running this on every session save
+// doesn't double-grant.
+export function applyFreezeAccrual(log, todayTotalSec, todayKeyStr) {
+  if (!log.streakGoalSec) return log;
+  const extraMinutes = Math.floor(Math.max(0, todayTotalSec - log.streakGoalSec) / 60);
+  const prevCredited = (log.freezeCredit && log.freezeCredit.date === todayKeyStr) ? log.freezeCredit.minutes : 0;
+  if (extraMinutes <= prevCredited) {
+    return log.freezeCredit && log.freezeCredit.date === todayKeyStr ? log : { ...log, freezeCredit: { date: todayKeyStr, minutes: extraMinutes } };
+  }
+  const newTokens = Math.floor((extraMinutes - prevCredited) / FREEZE_MINUTES_PER_TOKEN);
+  if (newTokens <= 0) return { ...log, freezeCredit: { date: todayKeyStr, minutes: extraMinutes } };
+  const current = log.freezeTokens || 0;
+  const grantable = Math.min(newTokens, Math.max(0, MAX_FREEZE_TOKENS - current));
+  return { ...log, freezeTokens: current + grantable, freezeCredit: { date: todayKeyStr, minutes: extraMinutes } };
+}
+
+// Runs after a session is added: awards time-based XP (with streak
+// multiplier), the once-per-day goal-completion bonus, and freeze-token
+// accrual — all in one pass so callers only need one scheduleSave.
+export function applySessionEffects(data, session) {
+  const sessions = [...data.sessions, session];
+  let logs = data.logs;
+  const log = logs.find(l => l.id === session.logId);
+  let xp = data.xp;
+
+  if (log) {
+    const restoredDates = new Set(log.restoredDates || []);
+    const streakCount = log.streakGoalSec ? computeStreak(sessions, log.id, log.streakGoalSec, { restoredDates }) : 0;
+    const mult = streakMultiplier(streakCount);
+    xp = applyXpGain(xp, Math.round(xpForSeconds(session.duration) * mult), session.date);
+
+    if (log.streakGoalSec) {
+      const todayTotal = sessions.filter(s => s.logId === log.id && s.date === session.date).reduce((a, s) => a + s.duration, 0);
+      let nextLog = applyFreezeAccrual(log, todayTotal, session.date);
+
+      // Once-per-day bonus for hitting today's goal.
+      if (todayTotal >= log.streakGoalSec && nextLog.lastBonusDate !== session.date) {
+        xp = applyXpGain(xp, Math.round(DAILY_GOAL_BONUS_XP * mult), session.date);
+        nextLog = { ...nextLog, lastBonusDate: session.date };
+      }
+
+      // Resolve a pending "catch-up" restore if today's total now covers it.
+      if (nextLog.catchUpTarget && nextLog.catchUpTarget.date === session.date && todayTotal >= nextLog.catchUpTarget.neededSeconds) {
+        nextLog = {
+          ...nextLog,
+          restoredDates: [...(nextLog.restoredDates || []), nextLog.catchUpTarget.restoreDate],
+          catchUpTarget: null,
+        };
+      }
+
+      logs = logs.map(l => (l.id === log.id ? nextLog : l));
+    }
+  }
+
+  return { ...data, sessions, logs, xp };
+}
+
+// Looks for a streak that broke yesterday (goal missed) after having built
+// up a real streak the day before — and that hasn't already been flagged.
+// Returns the updated log (with brokenStreak set) or the same log if
+// there's nothing new to flag.
+export function detectBrokenStreak(log, sessions, now) {
+  if (!log.streakGoalSec) return log;
+  if (log.brokenStreak) return log; // already flagged, waiting on the user
+  const restoredDates = new Set(log.restoredDates || []);
+  const yesterday = addDays(now, -1);
+  const yKey = dateKey(yesterday);
+  if (log.lastBrokenCheck === yKey) return log; // already checked this day, nothing found
+  const totals = {};
+  sessions.forEach(s => { if (s.logId === log.id) totals[s.date] = (totals[s.date] || 0) + s.duration; });
+  const yesterdayHit = (totals[yKey] || 0) >= log.streakGoalSec || restoredDates.has(yKey);
+  if (yesterdayHit) return { ...log, lastBrokenCheck: yKey };
+  const priorStreak = computeStreak(sessions, log.id, log.streakGoalSec, { restoredDates, asOf: addDays(now, -2) });
+  if (priorStreak <= 0) return { ...log, lastBrokenCheck: yKey };
+  return { ...log, lastBrokenCheck: yKey, brokenStreak: { date: yKey, priorStreak } };
 }
 
