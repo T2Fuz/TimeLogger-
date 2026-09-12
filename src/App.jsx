@@ -355,7 +355,7 @@ export default function App() {
           const session = { id: uid(), logId: prev.logId, date: dateKey(prev.startedAt), start: prev.startedAt, end: endedAt, duration };
           const nextData = applySessionEffects(dataRef.current, session);
           scheduleSave(nextData);
-          checkStreakCelebration(session, nextData.sessions);
+          checkStreakCelebration(session, nextData.sessions, nextData.logs);
         }
         next = prev.logId === logId ? null : { logId, startedAt: Date.now() };
       } else {
@@ -369,9 +369,9 @@ export default function App() {
   // Fires the Duolingo-style celebration once per log per day, the moment
   // that log's total for today first reaches its streak goal.
   const celebratedRef = useRef(new Set());
-  function checkStreakCelebration(newSession, allSessions) {
+  function checkStreakCelebration(newSession, allSessions, allLogs) {
     const logId = newSession.logId;
-    const log = dataRef.current.logs.find(l => l.id === logId);
+    const log = (allLogs || dataRef.current.logs).find(l => l.id === logId);
     if (!log || !log.streakGoalSec) return;
     const key = `${todayKey()}-${logId}`;
     if (celebratedRef.current.has(key)) return;
@@ -380,7 +380,7 @@ export default function App() {
     const beforeThisSession = todaysTotal - newSession.duration;
     if (beforeThisSession >= log.streakGoalSec) { celebratedRef.current.add(key); return; } // already celebrated earlier today
     celebratedRef.current.add(key);
-    const streakCount = computeStreak(allSessions, logId, log.streakGoalSec);
+    const streakCount = computeStreak(allSessions, logId, log.streakGoalSec, { restoredDates: new Set(log.restoredDates || []) });
     setCelebration({ name: log.name, color: log.color, streak: streakCount });
   }
 
@@ -468,7 +468,7 @@ export default function App() {
     const session = { id: uid(), logId: manualLogId, date: manualDate, start: startTs, end: endTs, duration };
     const nextData = applySessionEffects(dataRef.current, session);
     scheduleSave(nextData);
-    checkStreakCelebration(session, nextData.sessions);
+    checkStreakCelebration(session, nextData.sessions, nextData.logs);
     setManualOpen(false);
   }
 
@@ -753,7 +753,7 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
   const idx = siblings.findIndex(l => l.id === log.id);
   const hasDatedNotes = !!log.notesByDate;
   const todayNote = hasDatedNotes ? (log.notesByDate[todayKey()] || "") : (log.note || "");
-  const streakCount = log.streakGoalSec ? computeStreak(sessions || [], log.id, log.streakGoalSec) : 0;
+  const streakCount = log.streakGoalSec ? computeStreak(sessions || [], log.id, log.streakGoalSec, { restoredDates: new Set(log.restoredDates || []) }) : 0;
   const [goalMenuOpen, setGoalMenuOpen] = useState(false);
   const [goalH, setGoalH] = useState(String(Math.floor((log.streakGoalSec || 0) / 3600)));
   const [goalM, setGoalM] = useState(String(Math.floor(((log.streakGoalSec || 0) % 3600) / 60)));
