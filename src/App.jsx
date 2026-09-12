@@ -16,7 +16,7 @@ import {
 } from "./helpers.js";
 import { SessionRow, GroupedSessionList } from "./SessionViews.jsx";
 import { StoryGate, StoryHistoryModal } from "./ComebackStory.jsx";
-import { XpSummary, StreakRestoreModal } from "./Xp.jsx";
+import { XpSummary, StreakRestoreModal, HeaderXpBadge } from "./Xp.jsx";
 // Statistics uses recharts (the app's single heaviest dependency) — loading
 // it lazily means it's only downloaded when the person actually opens the
 // Statistics tab, instead of on every app open. This is the main fix for
@@ -930,9 +930,12 @@ function HomeScreen(props) {
         </div>
         <div className="text-sm font-medium text-white/80 mb-1">{fmtLongDate(new Date())}</div>
         <div className="text-4xl font-bold tracking-tight tabular-nums">{fmtHMS(todayTotal)}</div>
-        <div className="flex gap-8 mt-4 text-sm text-white/90">
-          <div><div className="text-white/70 text-xs mb-0.5">Today</div>{fmtHMS(todayTotal)}</div>
-          <div><div className="text-white/70 text-xs mb-0.5">Current focus</div>{fmtHMS(currentFocus)}</div>
+        <div className="flex items-end justify-between mt-4">
+          <div className="flex gap-8 text-sm text-white/90">
+            <div><div className="text-white/70 text-xs mb-0.5">Today</div>{fmtHMS(todayTotal)}</div>
+            <div><div className="text-white/70 text-xs mb-0.5">Current focus</div>{fmtHMS(currentFocus)}</div>
+          </div>
+          <HeaderXpBadge data={data} />
         </div>
       </div>
 

@@ -4,6 +4,27 @@ import {
   RESTORE_XP_COST, MAX_FREEZE_TOKENS, LIFELINE_COOLDOWN_DAYS,
 } from "./helpers.js";
 
+// Compact badge for the orange header, in the space next to "Today" /
+// "Current focus" — just level + a sliver of progress, full detail lives in
+// the Settings XpSummary.
+export function HeaderXpBadge({ data }) {
+  const xp = data.xp || { total: 0 };
+  const { level, xpIntoLevel, xpForNextLevel } = levelInfo(xp.total);
+  const pct = Math.min(100, Math.round((xpIntoLevel / xpForNextLevel) * 100));
+  return (
+    <div className="flex items-center gap-1.5 bg-white/20 rounded-full pl-2 pr-3 py-1.5">
+      <Zap size={13} className="text-white fill-white shrink-0" />
+      <div>
+        <div className="text-xs font-bold text-white leading-none">Lv {level}</div>
+        <div className="w-12 h-1 rounded-full bg-white/25 mt-1 overflow-hidden">
+          <div className="h-full bg-white rounded-full" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // Compact level/XP summary — dropped into Settings, near the old streak
 // section. Shows lifetime level progress and the spendable balance that
 // streak-restores draw down (spending never lowers the level).
