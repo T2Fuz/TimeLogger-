@@ -603,6 +603,7 @@ export default function App() {
           subLogName={subLogName} setSubLogName={setSubLogName}
           isOnline={isOnline} user={user} syncing={syncing} setSkippedLogin={setSkippedLogin}
           settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen}
+          onOpenRestore={setRestoreModalLogId}
           setStoryHistoryOpen={setStoryHistoryOpen}
           onExport={handleExport} onImport={handleImport}
           now={now}
@@ -924,6 +925,7 @@ function HomeScreen(props) {
     manualOpen, setManualOpen, manualLogId, setManualLogId, manualDate, setManualDate,
     manualMode, setManualMode, manualStart, setManualStart, manualEnd, setManualEnd,
     manualH, setManualH, manualM, setManualM, addManualSession,
+    onOpenRestore,
   } = props;
 
   const topLevelLogs = data.logs.filter(l => !l.parentId && !l.archived);
@@ -976,7 +978,7 @@ function HomeScreen(props) {
                   renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                   logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
                   setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote} setLogStreakGoal={setLogStreakGoal}
-                  allLogs={data.logs} sessions={data.sessions} onOpenRestore={setRestoreModalLogId}
+                  allLogs={data.logs} sessions={data.sessions} onOpenRestore={onOpenRestore}
                   isExpanded={isExpanded} onToggleExpand={() => setExpandedId(isExpanded ? null : log.id)}
                 />
                 {isExpanded && (
@@ -989,7 +991,7 @@ function HomeScreen(props) {
                         renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                         logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
                         setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote} setLogStreakGoal={setLogStreakGoal}
-                        allLogs={data.logs} sessions={data.sessions} onOpenRestore={setRestoreModalLogId}
+                        allLogs={data.logs} sessions={data.sessions} onOpenRestore={onOpenRestore}
                       />
                     ))}
                     <div className="pl-10 pr-5 py-2.5 bg-neutral-950/40 border-b border-neutral-800">
