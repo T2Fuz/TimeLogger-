@@ -16,7 +16,7 @@ import {
 } from "./helpers.js";
 import { SessionRow, GroupedSessionList } from "./SessionViews.jsx";
 import { StoryGate, StoryHistoryModal } from "./ComebackStory.jsx";
-import { StreakRestoreModal, HeaderXpBadge } from "./Xp.jsx";
+import { StreakRestoreModal, HeaderXpBadge, RestorePill } from "./Xp.jsx";
 // Statistics uses recharts (the app's single heaviest dependency) — loading
 // it lazily means it's only downloaded when the person actually opens the
 // Statistics tab, instead of on every app open. This is the main fix for
@@ -289,7 +289,8 @@ export default function App() {
     if (changed) scheduleSave({ ...cur, logs });
   }, [now]);
 
-  const brokenStreakLog = data.logs.find(l => l.brokenStreak && !l.archived);
+  const [restoreModalLogId, setRestoreModalLogId] = useState(null);
+  const restoreModalLog = data.logs.find(l => l.id === restoreModalLogId) || null;
 
   function resolveStreakRestore(logId, method) {
     const log = dataRef.current.logs.find(l => l.id === logId);
@@ -301,7 +302,7 @@ export default function App() {
       nextData = {
         ...nextData,
         logs: nextData.logs.map(l => l.id === logId ? {
-          ...l, freezeTokens: (l.freezeTokens || 0) - 1,
+          ...l, freezeTokens: (l.freezeTokens || 0) - 1, catchUpTarget: null,
           restoredDates: [...(l.restoredDates || []), restoreDate],
           brokenStreak: null,
         } : l),
@@ -311,23 +312,26 @@ export default function App() {
         ...nextData,
         xp: { ...nextData.xp, spendable: nextData.xp.spendable - RESTORE_XP_COST },
         logs: nextData.logs.map(l => l.id === logId ? {
-          ...l, restoredDates: [...(l.restoredDates || []), restoreDate], brokenStreak: null,
+          ...l, catchUpTarget: null,
+          restoredDates: [...(l.restoredDates || []), restoreDate], brokenStreak: null,
         } : l),
       };
     } else if (method === "catchup") {
+      // Doesn't resolve immediately — stays pending (and brokenStreak stays
+      // set) until today's logged time actually covers it, or the person
+      // reopens this and picks a different method instead.
       nextData = {
         ...nextData,
         logs: nextData.logs.map(l => l.id === logId ? {
           ...l,
           catchUpTarget: { date: todayKey(), neededSeconds: (l.streakGoalSec || 0) * 2, restoreDate },
-          brokenStreak: null,
         } : l),
       };
     } else if (method === "lifeline") {
       nextData = {
         ...nextData,
         logs: nextData.logs.map(l => l.id === logId ? {
-          ...l, lastLifelineDate: todayKey(),
+          ...l, lastLifelineDate: todayKey(), catchUpTarget: null,
           restoredDates: [...(l.restoredDates || []), restoreDate],
           brokenStreak: null,
         } : l),
@@ -336,13 +340,15 @@ export default function App() {
       return;
     }
     scheduleSave(nextData);
+    setRestoreModalLogId(null);
   }
 
   function dismissStreakRestore(logId) {
     scheduleSave({
       ...dataRef.current,
-      logs: dataRef.current.logs.map(l => l.id === logId ? { ...l, brokenStreak: null } : l),
+      logs: dataRef.current.logs.map(l => l.id === logId ? { ...l, brokenStreak: null, catchUpTarget: null } : l),
     });
+    setRestoreModalLogId(null);
   }
 
   function toggleLog(logId) {
@@ -609,10 +615,11 @@ export default function App() {
 
       <StreakCelebration celebration={celebration} onClose={() => setCelebration(null)} />
       <StreakRestoreModal
-        log={brokenStreakLog}
+        log={restoreModalLog}
         data={data}
-        onResolve={(method) => resolveStreakRestore(brokenStreakLog.id, method)}
-        onDismiss={() => dismissStreakRestore(brokenStreakLog.id)}
+        onResolve={(method) => resolveStreakRestore(restoreModalLog.id, method)}
+        onDismiss={() => dismissStreakRestore(restoreModalLog.id)}
+        onClose={() => setRestoreModalLogId(null)}
       />
       {/* Comeback story feature disabled for now — flip back on by uncommenting.
       <StoryGate data={data} scheduleSave={scheduleSave} now={now} /> */}
@@ -747,7 +754,7 @@ function ColorWheel({ color, onChange }) {
 function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
   renameId, setRenameId, renameVal, setRenameVal, renameLog,
   logMenuId, setLogMenuId, colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogParent, setLogNote, setLogStreakGoal, deleteLog, moveLog,
-  allLogs, sessions,
+  allLogs, sessions, onOpenRestore,
   isChild, isExpanded, onToggleExpand }) {
   const isActive = activeTimer && activeTimer.logId === log.id;
   const idx = siblings.findIndex(l => l.id === log.id);
@@ -803,6 +810,7 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
             <Flame size={12} className="fill-orange-400" />{streakCount}
           </span>
         )}
+        <RestorePill log={log} onClick={() => onOpenRestore(log.id)} />
         <span className={`text-sm tabular-nums ${isActive ? "text-orange-400 font-semibold" : "text-gray-400"}`}>{fmtHMS(logTodayTotal(log.id))}</span>
         <button onClick={() => (noteOpen ? setNoteOpen(false) : openNote())} className={`p-1 shrink-0 ${todayNote ? "text-orange-400" : "text-gray-500"} hover:text-orange-400`}>
           <StickyNote size={15} />
@@ -968,7 +976,7 @@ function HomeScreen(props) {
                   renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                   logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
                   setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote} setLogStreakGoal={setLogStreakGoal}
-                  allLogs={data.logs} sessions={data.sessions}
+                  allLogs={data.logs} sessions={data.sessions} onOpenRestore={setRestoreModalLogId}
                   isExpanded={isExpanded} onToggleExpand={() => setExpandedId(isExpanded ? null : log.id)}
                 />
                 {isExpanded && (
@@ -981,7 +989,7 @@ function HomeScreen(props) {
                         renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                         logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
                         setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote} setLogStreakGoal={setLogStreakGoal}
-                        allLogs={data.logs} sessions={data.sessions}
+                        allLogs={data.logs} sessions={data.sessions} onOpenRestore={setRestoreModalLogId}
                       />
                     ))}
                     <div className="pl-10 pr-5 py-2.5 bg-neutral-950/40 border-b border-neutral-800">

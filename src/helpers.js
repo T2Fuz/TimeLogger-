@@ -293,12 +293,14 @@ export function applySessionEffects(data, session) {
         nextLog = { ...nextLog, lastBonusDate: session.date };
       }
 
-      // Resolve a pending "catch-up" restore if today's total now covers it.
-      if (nextLog.catchUpTarget && nextLog.catchUpTarget.date === session.date && todayTotal >= nextLog.catchUpTarget.neededSeconds) {
+      // Resolve a pending "catch-up" restore once today's (or a later day's,
+      // if they didn't get to it same-day) total covers double the goal.
+      if (nextLog.catchUpTarget && session.date >= nextLog.catchUpTarget.date && todayTotal >= nextLog.catchUpTarget.neededSeconds) {
         nextLog = {
           ...nextLog,
           restoredDates: [...(nextLog.restoredDates || []), nextLog.catchUpTarget.restoreDate],
           catchUpTarget: null,
+          brokenStreak: null,
         };
       }
 

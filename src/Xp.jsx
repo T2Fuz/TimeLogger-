@@ -54,7 +54,7 @@ export function XpSummary({ data }) {
 // Pops up when a log's streak broke yesterday and hasn't been resolved yet.
 // Lets the person pick whichever restore method they're comfortable with,
 // or let the streak reset. `onResolve` receives the chosen method id.
-export function StreakRestoreModal({ log, data, onResolve, onDismiss }) {
+export function StreakRestoreModal({ log, data, onResolve, onDismiss, onClose }) {
   if (!log || !log.brokenStreak) return null;
 
   const xp = data.xp || { spendable: 0 };
@@ -64,16 +64,18 @@ export function StreakRestoreModal({ log, data, onResolve, onDismiss }) {
   const lastLifeline = log.lastLifelineDate ? new Date(log.lastLifelineDate) : null;
   const canLifeline = !lastLifeline || dateKey(addDays(lastLifeline, LIFELINE_COOLDOWN_DAYS)) <= todayKey();
   const catchUpTarget = fmtGoalTimes(log.streakGoalSec);
+  const catchUpActive = !!log.catchUpTarget;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-4">
       <div className="bg-neutral-900 border border-neutral-700 rounded-2xl max-w-sm w-full p-5">
         <div className="flex items-center gap-2 mb-1">
           <Flame size={20} className="text-orange-400" />
-          <div className="text-lg font-bold text-white">স্ট্রিক ভেঙে গেছে</div>
+          <div className="text-lg font-bold text-white flex-1">স্ট্রিক ভেঙে গেছে</div>
+          {onClose && <button onClick={onClose} className="text-gray-500 hover:text-gray-300"><X size={18} /></button>}
         </div>
         <p className="text-sm text-gray-400 mb-4">
-          "{log.name}" এর {log.brokenStreak.priorStreak}-দিনের স্ট্রিক গতকাল মিস হয়ে গেছে। ফিরিয়ে আনতে চাইলে নিচের যেকোনো একটা উপায় বেছে নিন।
+          "{log.name}" এর {log.brokenStreak.priorStreak}-দিনের স্ট্রিক মিস হয়ে গেছে। ফিরিয়ে আনতে চাইলে নিচের যেকোনো একটা উপায় বেছে নিন — একবার বেছে নেওয়ার পরও এখানে ফিরে এসে পাল্টাতে পারবেন, যতক্ষণ না সেটা সম্পূর্ণ হচ্ছে।
         </p>
 
         <div className="space-y-2">
@@ -94,8 +96,9 @@ export function StreakRestoreModal({ log, data, onResolve, onDismiss }) {
           <RestoreOption
             icon={<RotateCcw size={16} />}
             title="আজকে পুষিয়ে দিন"
-            detail={`আজ "${log.name}" এ ${catchUpTarget} লগ করলে স্ট্রিক ফিরে আসবে — ফ্রি`}
+            detail={catchUpActive ? `চলছে — "${log.name}" এ ${catchUpTarget} লগ হলেই সম্পূর্ণ হবে` : `আজ "${log.name}" এ ${catchUpTarget} লগ করলে স্ট্রিক ফিরে আসবে — ফ্রি`}
             enabled={true}
+            selected={catchUpActive}
             onClick={() => onResolve("catchup")}
           />
           <RestoreOption
@@ -115,18 +118,20 @@ export function StreakRestoreModal({ log, data, onResolve, onDismiss }) {
   );
 }
 
-function RestoreOption({ icon, title, detail, enabled, onClick }) {
+function RestoreOption({ icon, title, detail, enabled, selected, onClick }) {
   return (
     <button
       onClick={enabled ? onClick : undefined}
       disabled={!enabled}
       className={`w-full flex items-center gap-3 text-left rounded-xl px-3 py-2.5 border ${
-        enabled
+        selected
+          ? "border-orange-500 bg-orange-500/10"
+          : enabled
           ? "border-neutral-700 bg-neutral-800 hover:border-orange-500/60 active:scale-[0.99]"
           : "border-neutral-800 bg-neutral-900/50 opacity-50 cursor-not-allowed"
       }`}
     >
-      <span className={enabled ? "text-orange-400" : "text-gray-600"}>{icon}</span>
+      <span className={selected || enabled ? "text-orange-400" : "text-gray-600"}>{icon}</span>
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-gray-200">{title}</div>
         <div className="text-[11px] text-gray-500">{detail}</div>
@@ -139,4 +144,24 @@ function fmtGoalTimes(goalSec) {
   const doubleSec = (goalSec || 0) * 2;
   const h = Math.floor(doubleSec / 3600), m = Math.floor((doubleSec % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+// Small tappable indicator shown on a log row when it has an unresolved
+// broken streak — Snapchat-style: quiet until tapped, opens the full
+// options sheet. Also used while a "catch-up" plan is in progress, so the
+// person can come back and switch to a different method.
+export function RestorePill({ log, onClick }) {
+  if (!log.brokenStreak) return null;
+  const inProgress = !!log.catchUpTarget;
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-full shrink-0 ${
+        inProgress ? "bg-orange-500/15 text-orange-400" : "bg-red-500/15 text-red-400"
+      }`}
+    >
+      {inProgress ? <RotateCcw size={11} /> : <Flame size={11} />}
+      {inProgress ? "পুনরুদ্ধার হচ্ছে" : "Restore"}
+    </button>
+  );
 }
