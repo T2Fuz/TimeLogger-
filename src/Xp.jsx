@@ -12,15 +12,16 @@ export function HeaderXpBadge({ data }) {
   const { level, xpIntoLevel, xpForNextLevel } = levelInfo(xp.total);
   const pct = Math.min(100, Math.round((xpIntoLevel / xpForNextLevel) * 100));
   return (
-    <div className="bg-white/20 rounded-2xl px-3.5 py-2.5 min-w-[130px]">
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <Zap size={16} className="text-white fill-white shrink-0" />
-        <div className="text-base font-bold text-white leading-none">Level {level}</div>
+    <div className="h-full bg-white/20 rounded-2xl px-4 py-3.5 flex flex-col justify-center">
+      <div className="flex items-center gap-2 mb-2">
+        <Zap size={20} className="text-white fill-white shrink-0" />
+        <div className="text-xl font-bold text-white leading-none">Level {level}</div>
       </div>
-      <div className="w-full h-1.5 rounded-full bg-white/25 overflow-hidden">
+      <div className="w-full h-2 rounded-full bg-white/25 overflow-hidden">
         <div className="h-full bg-white rounded-full" style={{ width: `${pct}%` }} />
       </div>
-      <div className="text-[11px] text-white/80 mt-1">{xpIntoLevel}/{xpForNextLevel} XP · {xp.spendable || 0} available</div>
+      <div className="text-xs text-white/80 mt-1.5">{xpIntoLevel}/{xpForNextLevel} XP</div>
+      <div className="text-xs text-white/80">{xp.spendable || 0} XP available</div>
     </div>
   );
 }

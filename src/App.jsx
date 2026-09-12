@@ -928,14 +928,18 @@ function HomeScreen(props) {
           <TopSyncBar isOnline={isOnline} onExport={onExport} onImport={onImport} user={user} syncing={syncing} setSkippedLogin={setSkippedLogin} />
           <button onClick={() => setSettingsOpen(true)} title="Settings" className="p-1.5 rounded-full bg-white/20 text-white"><SettingsIcon size={14} /></button>
         </div>
-        <div className="text-sm font-medium text-white/80 mb-1">{fmtLongDate(new Date())}</div>
-        <div className="text-4xl font-bold tracking-tight tabular-nums">{fmtHMS(todayTotal)}</div>
-        <div className="flex items-center justify-between mt-4">
-          <div className="flex gap-6 text-sm text-white/90">
-            <div><div className="text-white/70 text-xs mb-0.5">Today</div>{fmtHMS(todayTotal)}</div>
-            <div><div className="text-white/70 text-xs mb-0.5">Current focus</div>{fmtHMS(currentFocus)}</div>
+        <div className="flex items-stretch gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-white/80 mb-1">{fmtLongDate(new Date())}</div>
+            <div className="text-4xl font-bold tracking-tight tabular-nums">{fmtHMS(todayTotal)}</div>
+            <div className="flex gap-6 text-sm text-white/90 mt-4">
+              <div><div className="text-white/70 text-xs mb-0.5">Today</div>{fmtHMS(todayTotal)}</div>
+              <div><div className="text-white/70 text-xs mb-0.5">Current focus</div>{fmtHMS(currentFocus)}</div>
+            </div>
           </div>
-          <HeaderXpBadge data={data} />
+          <div className="w-[46%] shrink-0">
+            <HeaderXpBadge data={data} />
+          </div>
         </div>
       </div>
 
