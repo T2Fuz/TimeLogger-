@@ -126,22 +126,19 @@ export function minutesToClock(mins) {
 export function todayKey() { return dateKey(new Date()); }
 export function addDays(d, n) { const dt = new Date(d); dt.setDate(dt.getDate() + n); return dt; }
 
-// Consecutive-day streak for a single log against a daily goal (in seconds).
-// Counts today only if it already meets the goal — an in-progress day that
-// hasn't hit the goal yet doesn't break a streak built on earlier days.
-// opts.restoredDates: a Set of dateKey strings that count as "hit" even
-// though the logged total didn't reach the goal (streak-restore feature).
-// opts.asOf: pretend "today" is this Date instead of the real now — used to
-// ask "what was the streak as of two days ago" when detecting a break.
+// Consecutive-day streak for a single log against a daily goal (in seconds),
+// counting only days that actually hit the goal. opts.asOf lets a caller ask
+// "what would this be if today were some other date" — used when figuring
+// out how long a streak was right before it broke.
 export function computeStreak(sessions, logId, goalSeconds, opts = {}) {
   if (!goalSeconds || goalSeconds <= 0) return 0;
-  const { restoredDates, asOf } = opts;
+  const { asOf } = opts;
   const totals = {};
   sessions.forEach(s => {
     if (s.logId !== logId) return;
     totals[s.date] = (totals[s.date] || 0) + s.duration;
   });
-  const hit = (k) => (totals[k] || 0) >= goalSeconds || (restoredDates && restoredDates.has(k));
+  const hit = (k) => (totals[k] || 0) >= goalSeconds;
   let streak = 0;
   let cursor = asOf ? new Date(asOf) : new Date();
   const todayStr = dateKey(cursor);
@@ -153,6 +150,16 @@ export function computeStreak(sessions, logId, goalSeconds, opts = {}) {
     else break;
   }
   return streak;
+}
+
+// The number that should actually be shown next to a log: whatever's been
+// banked from before its last restored gap (streakOffset), plus however
+// many real, consecutive days it's been hit since. A missed-and-restored
+// gap contributes nothing to the count itself — it just doesn't zero out
+// what came before it.
+export function effectiveStreak(log, sessions, asOf) {
+  if (!log.streakGoalSec) return 0;
+  return (log.streakOffset || 0) + computeStreak(sessions, log.id, log.streakGoalSec, { asOf });
 }
 export function startOfWeek(d) {
   const dt = new Date(d); const day = (dt.getDay() + 6) % 7;
@@ -278,8 +285,7 @@ export function applySessionEffects(data, session) {
   let xp = data.xp;
 
   if (log) {
-    const restoredDates = new Set(log.restoredDates || []);
-    const streakCount = log.streakGoalSec ? computeStreak(sessions, log.id, log.streakGoalSec, { restoredDates }) : 0;
+    const streakCount = log.streakGoalSec ? effectiveStreak(log, sessions) : 0;
     const mult = streakMultiplier(streakCount);
     xp = applyXpGain(xp, Math.round(xpForSeconds(session.duration) * mult), session.date);
 
@@ -294,11 +300,12 @@ export function applySessionEffects(data, session) {
       }
 
       // Resolve a pending "catch-up" restore once today's (or a later day's,
-      // if they didn't get to it same-day) total covers double the goal.
+      // if they didn't get to it same-day) total covers double the goal —
+      // banks the pre-break streak length and drops the whole missed gap.
       if (nextLog.catchUpTarget && session.date >= nextLog.catchUpTarget.date && todayTotal >= nextLog.catchUpTarget.neededSeconds) {
         nextLog = {
           ...nextLog,
-          restoredDates: [...(nextLog.restoredDates || []), nextLog.catchUpTarget.restoreDate],
+          streakOffset: nextLog.brokenStreak?.priorStreak || nextLog.streakOffset || 0,
           catchUpTarget: null,
           brokenStreak: null,
         };
@@ -311,23 +318,37 @@ export function applySessionEffects(data, session) {
   return { ...data, sessions, logs, xp };
 }
 
-// Looks for a streak that broke yesterday (goal missed) after having built
-// up a real streak the day before — and that hasn't already been flagged.
-// Returns the updated log (with brokenStreak set) or the same log if
-// there's nothing new to flag.
+// Looks for a streak-break that happened before today — walking back day by
+// day from yesterday, collecting every consecutive missed day (there can be
+// more than one) until it finds a real hit. If a real streak was standing
+// right before that gap started, flags it (log.brokenStreak) so the restore
+// modal can offer to bank that streak length and pick up from here — the
+// missed days themselves are never counted, only skipped over.
 export function detectBrokenStreak(log, sessions, now) {
   if (!log.streakGoalSec) return log;
   if (log.brokenStreak) return log; // already flagged, waiting on the user
-  const restoredDates = new Set(log.restoredDates || []);
   const yesterday = addDays(now, -1);
   const yKey = dateKey(yesterday);
-  if (log.lastBrokenCheck === yKey) return log; // already checked this day, nothing found
+  if (log.lastBrokenCheck === yKey) return log; // already checked this day, nothing new
   const totals = {};
   sessions.forEach(s => { if (s.logId === log.id) totals[s.date] = (totals[s.date] || 0) + s.duration; });
-  const yesterdayHit = (totals[yKey] || 0) >= log.streakGoalSec || restoredDates.has(yKey);
-  if (yesterdayHit) return { ...log, lastBrokenCheck: yKey };
-  const priorStreak = computeStreak(sessions, log.id, log.streakGoalSec, { restoredDates, asOf: addDays(now, -2) });
+  const hit = (k) => (totals[k] || 0) >= log.streakGoalSec;
+
+  if (hit(yKey)) return { ...log, lastBrokenCheck: yKey }; // no break
+
+  const missedDates = [];
+  let cursor = yesterday;
+  while (!hit(dateKey(cursor))) {
+    missedDates.unshift(dateKey(cursor));
+    cursor = addDays(cursor, -1);
+    // Bail out if this stretches back further than the log has any
+    // sessions for at all — nothing to restore, just an old/unused log.
+    if (missedDates.length > 365) return { ...log, lastBrokenCheck: yKey };
+  }
+  // cursor now sits on the last real hit before the gap — bank the full
+  // effective streak (offset + real chain) as of that day.
+  const priorStreak = effectiveStreak(log, sessions, cursor);
   if (priorStreak <= 0) return { ...log, lastBrokenCheck: yKey };
-  return { ...log, lastBrokenCheck: yKey, brokenStreak: { date: yKey, priorStreak } };
+  return { ...log, lastBrokenCheck: yKey, brokenStreak: { dates: missedDates, priorStreak } };
 }
 

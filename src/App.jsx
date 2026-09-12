@@ -12,7 +12,7 @@ import {
   fmtHMS, fmtHM, updateAppSettings, fmtClock, fmtAMPM, dateKey, logicalMinutes,
   minutesToClock, todayKey, addDays, startOfWeek, weekdayIdx,
   WEEKDAYS, WEEKDAYS_SHORT3, MONTHS, MONTHS_LONG, fmtLongDate, defaultData, computeStreak,
-  applySessionEffects, detectBrokenStreak, RESTORE_XP_COST,
+  applySessionEffects, detectBrokenStreak, RESTORE_XP_COST, effectiveStreak,
 } from "./helpers.js";
 import { SessionRow, GroupedSessionList } from "./SessionViews.jsx";
 import { StoryGate, StoryHistoryModal } from "./ComebackStory.jsx";
@@ -295,7 +295,7 @@ export default function App() {
   function resolveStreakRestore(logId, method) {
     const log = dataRef.current.logs.find(l => l.id === logId);
     if (!log || !log.brokenStreak) return;
-    const restoreDate = log.brokenStreak.date;
+    const bankedStreak = log.brokenStreak.priorStreak;
     let nextData = dataRef.current;
 
     if (method === "freeze" && (log.freezeTokens || 0) > 0) {
@@ -303,8 +303,7 @@ export default function App() {
         ...nextData,
         logs: nextData.logs.map(l => l.id === logId ? {
           ...l, freezeTokens: (l.freezeTokens || 0) - 1, catchUpTarget: null,
-          restoredDates: [...(l.restoredDates || []), restoreDate],
-          brokenStreak: null,
+          streakOffset: bankedStreak, brokenStreak: null,
         } : l),
       };
     } else if (method === "xp" && (nextData.xp?.spendable || 0) >= RESTORE_XP_COST) {
@@ -313,18 +312,18 @@ export default function App() {
         xp: { ...nextData.xp, spendable: nextData.xp.spendable - RESTORE_XP_COST },
         logs: nextData.logs.map(l => l.id === logId ? {
           ...l, catchUpTarget: null,
-          restoredDates: [...(l.restoredDates || []), restoreDate], brokenStreak: null,
+          streakOffset: bankedStreak, brokenStreak: null,
         } : l),
       };
     } else if (method === "catchup") {
       // Doesn't resolve immediately — stays pending (and brokenStreak stays
-      // set) until today's logged time actually covers it, or the person
-      // reopens this and picks a different method instead.
+      // set, holding the banked amount) until today's logged time actually
+      // covers it, or the person reopens this and picks something else.
       nextData = {
         ...nextData,
         logs: nextData.logs.map(l => l.id === logId ? {
           ...l,
-          catchUpTarget: { date: todayKey(), neededSeconds: (l.streakGoalSec || 0) * 2, restoreDate },
+          catchUpTarget: { date: todayKey(), neededSeconds: (l.streakGoalSec || 0) * 2 },
         } : l),
       };
     } else if (method === "lifeline") {
@@ -332,8 +331,7 @@ export default function App() {
         ...nextData,
         logs: nextData.logs.map(l => l.id === logId ? {
           ...l, lastLifelineDate: todayKey(), catchUpTarget: null,
-          restoredDates: [...(l.restoredDates || []), restoreDate],
-          brokenStreak: null,
+          streakOffset: bankedStreak, brokenStreak: null,
         } : l),
       };
     } else {
@@ -346,7 +344,7 @@ export default function App() {
   function dismissStreakRestore(logId) {
     scheduleSave({
       ...dataRef.current,
-      logs: dataRef.current.logs.map(l => l.id === logId ? { ...l, brokenStreak: null, catchUpTarget: null } : l),
+      logs: dataRef.current.logs.map(l => l.id === logId ? { ...l, brokenStreak: null, catchUpTarget: null, streakOffset: 0 } : l),
     });
     setRestoreModalLogId(null);
   }
@@ -386,7 +384,7 @@ export default function App() {
     const beforeThisSession = todaysTotal - newSession.duration;
     if (beforeThisSession >= log.streakGoalSec) { celebratedRef.current.add(key); return; } // already celebrated earlier today
     celebratedRef.current.add(key);
-    const streakCount = computeStreak(allSessions, logId, log.streakGoalSec, { restoredDates: new Set(log.restoredDates || []) });
+    const streakCount = effectiveStreak(log, allSessions);
     setCelebration({ name: log.name, color: log.color, streak: streakCount });
   }
 
@@ -761,7 +759,7 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
   const idx = siblings.findIndex(l => l.id === log.id);
   const hasDatedNotes = !!log.notesByDate;
   const todayNote = hasDatedNotes ? (log.notesByDate[todayKey()] || "") : (log.note || "");
-  const streakCount = log.streakGoalSec ? computeStreak(sessions || [], log.id, log.streakGoalSec, { restoredDates: new Set(log.restoredDates || []) }) : 0;
+  const streakCount = log.streakGoalSec ? effectiveStreak(log, sessions || []) : 0;
   const [goalMenuOpen, setGoalMenuOpen] = useState(false);
   const [goalH, setGoalH] = useState(String(Math.floor((log.streakGoalSec || 0) / 3600)));
   const [goalM, setGoalM] = useState(String(Math.floor(((log.streakGoalSec || 0) % 3600) / 60)));

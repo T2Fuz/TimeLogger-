@@ -75,7 +75,7 @@ export function StreakRestoreModal({ log, data, onResolve, onDismiss, onClose })
           {onClose && <button onClick={onClose} className="text-gray-500 hover:text-gray-300"><X size={18} /></button>}
         </div>
         <p className="text-sm text-gray-400 mb-4">
-          "{log.name}" এর {log.brokenStreak.priorStreak}-দিনের স্ট্রিক মিস হয়ে গেছে। ফিরিয়ে আনতে চাইলে নিচের যেকোনো একটা উপায় বেছে নিন — একবার বেছে নেওয়ার পরও এখানে ফিরে এসে পাল্টাতে পারবেন, যতক্ষণ না সেটা সম্পূর্ণ হচ্ছে।
+          "{log.name}" এর {log.brokenStreak.priorStreak}-দিনের স্ট্রিক {log.brokenStreak.dates.length > 1 ? `${log.brokenStreak.dates.length} দিন` : "একদিন"} মিস হয়ে গেছে। ফিরিয়ে আনতে চাইলে নিচের যেকোনো একটা উপায় বেছে নিন — একবার বেছে নেওয়ার পরও এখানে ফিরে এসে পাল্টাতে পারবেন, যতক্ষণ না সেটা সম্পূর্ণ হচ্ছে।
         </p>
 
         <div className="space-y-2">
