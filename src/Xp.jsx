@@ -8,18 +8,19 @@ import {
 // "Current focus" — just level + a sliver of progress, full detail lives in
 // the Settings XpSummary.
 export function HeaderXpBadge({ data }) {
-  const xp = data.xp || { total: 0 };
+  const xp = data.xp || { total: 0, spendable: 0 };
   const { level, xpIntoLevel, xpForNextLevel } = levelInfo(xp.total);
   const pct = Math.min(100, Math.round((xpIntoLevel / xpForNextLevel) * 100));
   return (
-    <div className="flex items-center gap-1.5 bg-white/20 rounded-full pl-2 pr-3 py-1.5">
-      <Zap size={13} className="text-white fill-white shrink-0" />
-      <div>
-        <div className="text-xs font-bold text-white leading-none">Lv {level}</div>
-        <div className="w-12 h-1 rounded-full bg-white/25 mt-1 overflow-hidden">
-          <div className="h-full bg-white rounded-full" style={{ width: `${pct}%` }} />
-        </div>
+    <div className="bg-white/20 rounded-2xl px-3.5 py-2.5 min-w-[130px]">
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <Zap size={16} className="text-white fill-white shrink-0" />
+        <div className="text-base font-bold text-white leading-none">Level {level}</div>
       </div>
+      <div className="w-full h-1.5 rounded-full bg-white/25 overflow-hidden">
+        <div className="h-full bg-white rounded-full" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="text-[11px] text-white/80 mt-1">{xpIntoLevel}/{xpForNextLevel} XP · {xp.spendable || 0} available</div>
     </div>
   );
 }
