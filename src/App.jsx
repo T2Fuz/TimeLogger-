@@ -172,7 +172,11 @@ export default function App() {
         try { cloud = await loadCloudData(user.uid); } catch (e) { /* offline, that's fine */ }
       }
 
-      let chosen = cloud || local;
+      // Pick whichever copy was actually saved more recently — a device
+      // that's been offline (or a reload that raced the debounced cloud
+      // write) shouldn't have its newer local data clobbered by an older
+      // cloud snapshot just because a cloud copy exists at all.
+      const chosen = (cloud && (cloud.updatedAt || 0) >= (local?.updatedAt || 0)) ? cloud : local;
       if (chosen) {
         const migrated = {
           ...defaultData(),
@@ -180,10 +184,10 @@ export default function App() {
           sessions: (chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
         };
         setData(migrated);
-        // If we just signed in and this device had local data the cloud
-        // didn't have yet (or didn't have at all), push it up right away —
-        // don't wait for the next log entry to trigger a save.
-        if (user && !cloud) {
+        // If local turned out to be the newer copy (this device had data the
+        // cloud didn't have yet, or a save never made it up before a reload),
+        // push it up right away — don't wait for the next log entry.
+        if (user && chosen === local) {
           persist(migrated);
         }
       }
@@ -202,9 +206,11 @@ export default function App() {
   const saveTimer = useRef(null);
   const lastSavedAtRef = useRef(0);
   function scheduleSave(next) {
-    setData(next);
+    const stamped = { ...next, updatedAt: Date.now() };
+    setData(stamped);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => persist(next), 350);
+    saveTimer.current = setTimeout(() => persist(stamped), 350);
+    return stamped;
   }
   async function persist(next) {
     try {
@@ -512,7 +518,12 @@ export default function App() {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        scheduleSave({ ...defaultData(), ...parsed });
+        // An explicit import should win outright and land in the cloud
+        // immediately — no waiting on the debounce, which a quick reload
+        // right after importing could otherwise race and lose.
+        const stamped = scheduleSave({ ...defaultData(), ...parsed });
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        persist(stamped);
       } catch (err) {}
     };
     reader.readAsText(file);

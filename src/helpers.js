@@ -190,6 +190,9 @@ export function defaultData() {
     // balance streak-restores draw down. capDate/capEarned track today's
     // earn-cap so a single day can't inflate level progress indefinitely.
     xp: { total: 0, spendable: 0, capDate: null, capEarned: 0 },
+    // Bumped on every save (see scheduleSave) — lets the cloud-vs-local load
+    // pick whichever copy is actually newer instead of always trusting one.
+    updatedAt: 0,
   };
 }
 
