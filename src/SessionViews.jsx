@@ -2,12 +2,21 @@ import { useState, useMemo } from "react";
 import { Pencil, ChevronDown, ChevronRight, StickyNote } from "lucide-react";
 import { fmtClock, fmtHMS, rootLogId } from "./helpers.js";
 
+// `<input type="time">` strictly requires 24-hour "HH:MM", regardless of the
+// person's 12-hour/24-hour display preference — fmtClock() respects that
+// display preference, so it can't be reused here or the input silently
+// rejects the value (shows blank) and any edit turns into an invalid date.
+function timeInputValue(ts) {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 export function SessionRow({ session, data, scheduleSave, dateKey }) {
   const [editing, setEditing] = useState(false);
   const [mode, setMode] = useState("range"); // "range" | "duration"
   const [date, setDate] = useState(session.date);
-  const [start, setStart] = useState(fmtClock(session.start));
-  const [end, setEnd] = useState(fmtClock(session.end));
+  const [start, setStart] = useState(timeInputValue(session.start));
+  const [end, setEnd] = useState(timeInputValue(session.end));
   const [hh, setHh] = useState(String(Math.floor(session.duration / 3600)));
   const [mm, setMm] = useState(String(Math.floor((session.duration % 3600) / 60)));
   const [noteDraft, setNoteDraft] = useState(session.note || "");
@@ -18,14 +27,15 @@ export function SessionRow({ session, data, scheduleSave, dateKey }) {
     if (mode === "duration") {
       s = new Date(`${date}T${start}:00`);
       duration = (parseInt(hh || "0", 10) * 3600) + (parseInt(mm || "0", 10) * 60);
-      if (duration <= 0) return;
+      if (!duration || duration <= 0 || isNaN(s.getTime())) return;
       e = new Date(s.getTime() + duration * 1000);
     } else {
       s = new Date(`${date}T${start}:00`);
       e = new Date(`${date}T${end}:00`);
+      if (isNaN(s.getTime()) || isNaN(e.getTime())) return;
       if (e <= s) e = new Date(e.getTime() + 86400000);
       duration = Math.round((e.getTime() - s.getTime()) / 1000);
-      if (duration <= 0) return;
+      if (!duration || duration <= 0) return;
     }
     scheduleSave({
       ...data,
@@ -34,6 +44,7 @@ export function SessionRow({ session, data, scheduleSave, dateKey }) {
     setEditing(false);
   }
   function remove() {
+    if (!window.confirm("Delete this session? This can't be undone.")) return;
     scheduleSave({ ...data, sessions: data.sessions.filter(x => x.id !== session.id) });
   }
 
@@ -75,10 +86,10 @@ export function SessionRow({ session, data, scheduleSave, dateKey }) {
           className="w-full bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1.5 text-xs resize-none"
         />
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           <button onClick={save} className="flex-1 bg-orange-500 text-white rounded py-1.5 text-xs font-medium">Save</button>
-          <button onClick={remove} className="px-3 bg-neutral-900 border border-red-900 text-red-400 rounded py-1.5 text-xs">Delete</button>
           <button onClick={() => setEditing(false)} className="px-3 bg-neutral-900 border border-neutral-700 text-gray-400 rounded py-1.5 text-xs">Cancel</button>
+          <button onClick={remove} className="text-red-500/70 hover:text-red-400 text-[11px] underline underline-offset-2 ml-1">Delete</button>
         </div>
       </div>
     );
