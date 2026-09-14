@@ -423,13 +423,11 @@ export default function App() {
   function setLogColorLive(id, color) {
     scheduleSave({ ...data, logs: data.logs.map(l => l.id === id ? { ...l, color } : l) });
   }
-  // Notes live on the session itself (see LogRow) so multiple sessions of
-  // the same log on the same day each keep their own note instead of
-  // clobbering one shared per-log-per-day slot.
-  function setSessionNote(sessionId, note) {
+  function setLogNote(id, note) {
+    const key = todayKey();
     scheduleSave({
       ...data,
-      sessions: data.sessions.map(s => s.id === sessionId ? { ...s, note } : s),
+      logs: data.logs.map(l => l.id === id ? { ...l, notesByDate: { ...(l.notesByDate || {}), [key]: note } } : l),
     });
   }
   // goalSeconds of 0/null clears the goal (and its streak, since there's
@@ -607,7 +605,7 @@ export default function App() {
           renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal}
           renameLog={renameLog} deleteLog={deleteLog} moveLog={moveLog}
           colorPickerId={colorPickerId} setColorPickerId={setColorPickerId} setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent}
-          setSessionNote={setSessionNote} setLogStreakGoal={setLogStreakGoal}
+          setLogNote={setLogNote} setLogStreakGoal={setLogStreakGoal}
           expandedId={expandedId} setExpandedId={setExpandedId}
           subLogOpen={subLogOpen} setSubLogOpen={setSubLogOpen}
           subLogParentId={subLogParentId} setSubLogParentId={setSubLogParentId}
@@ -765,18 +763,13 @@ function ColorWheel({ color, onChange }) {
 
 function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
   renameId, setRenameId, renameVal, setRenameVal, renameLog,
-  logMenuId, setLogMenuId, colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogParent, setSessionNote, setLogStreakGoal, deleteLog, moveLog,
+  logMenuId, setLogMenuId, colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogParent, setLogNote, setLogStreakGoal, deleteLog, moveLog,
   allLogs, sessions, onOpenRestore,
   isChild, isExpanded, onToggleExpand }) {
   const isActive = activeTimer && activeTimer.logId === log.id;
   const idx = siblings.findIndex(l => l.id === log.id);
-  // Notes live on the individual session, not the log/day — otherwise a
-  // second session of the same log on the same day would silently overwrite
-  // the first one's note. The note button here edits whichever session for
-  // this log was most recently active today.
-  const todaySessions = (sessions || []).filter(s => s.logId === log.id && s.date === todayKey()).sort((a, b) => b.end - a.end);
-  const latestSession = todaySessions[0] || null;
-  const todayNote = latestSession?.note || "";
+  const hasDatedNotes = !!log.notesByDate;
+  const todayNote = hasDatedNotes ? (log.notesByDate[todayKey()] || "") : (log.note || "");
   const streakCount = log.streakGoalSec ? effectiveStreak(log, sessions || []) : 0;
   const [goalMenuOpen, setGoalMenuOpen] = useState(false);
   const [goalH, setGoalH] = useState(String(Math.floor((log.streakGoalSec || 0) / 3600)));
@@ -788,13 +781,11 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
   const hasOwnChildren = (allLogs || []).some(l => l.parentId === log.id);
 
   function openNote() {
-    if (!latestSession) return; // nothing logged today yet to attach a note to
     setNoteDraft(todayNote);
     setNoteOpen(true);
   }
   function saveNote() {
-    if (!latestSession) return;
-    setSessionNote(latestSession.id, noteDraft.trim());
+    setLogNote(log.id, noteDraft.trim());
     setNoteOpen(false);
   }
 
@@ -831,9 +822,7 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
         )}
         <RestorePill log={log} onClick={() => onOpenRestore(log.id)} />
         <span className={`text-sm tabular-nums ${isActive ? "text-orange-400 font-semibold" : "text-gray-400"}`}>{fmtHMS(logTodayTotal(log.id))}</span>
-        <button onClick={() => (noteOpen ? setNoteOpen(false) : openNote())} disabled={!latestSession && !noteOpen}
-          title={!latestSession ? "Log some time first to attach a note" : ""}
-          className={`p-1 shrink-0 ${todayNote ? "text-orange-400" : !latestSession ? "text-gray-700" : "text-gray-500"} hover:text-orange-400`}>
+        <button onClick={() => (noteOpen ? setNoteOpen(false) : openNote())} className={`p-1 shrink-0 ${todayNote ? "text-orange-400" : "text-gray-500"} hover:text-orange-400`}>
           <StickyNote size={15} />
         </button>
         <div className="flex flex-col shrink-0">
@@ -917,15 +906,15 @@ function LogRow({ log, data, activeTimer, toggleLog, logTodayTotal, siblings,
         <div className={`mt-2 ${isChild ? "ml-9" : "ml-11"}`}>
           <textarea
             autoFocus rows={2} value={noteDraft} onChange={e => setNoteDraft(e.target.value)}
-            placeholder="Add a note for this session…"
+            placeholder="Add a note for today…"
             className="w-full bg-neutral-950 border border-neutral-700 text-gray-100 rounded-lg px-3 py-2 text-xs placeholder:text-gray-500 resize-none"
           />
-          <div className="text-[10px] text-gray-600 mt-1">Attached to your latest session today ({fmtClock(latestSession.start)}–{fmtClock(latestSession.end)}) — each session keeps its own note.</div>
+          <div className="text-[10px] text-gray-600 mt-1">Resets when the day rolls over (see Settings → Day reset time).</div>
           <div className="flex gap-2 mt-1.5">
             <button onClick={saveNote} className="bg-orange-500 text-white rounded-lg px-3 py-1 text-xs font-medium">Save</button>
             <button onClick={() => setNoteOpen(false)} className="border border-neutral-700 text-gray-400 rounded-lg px-3 py-1 text-xs">Cancel</button>
             {todayNote && (
-              <button onClick={() => { setSessionNote(latestSession.id, ""); setNoteDraft(""); setNoteOpen(false); }} className="text-red-400 text-xs ml-auto">Remove note</button>
+              <button onClick={() => { setLogNote(log.id, ""); setNoteDraft(""); setNoteOpen(false); }} className="text-red-400 text-xs ml-auto">Remove note</button>
             )}
           </div>
         </div>
@@ -939,7 +928,7 @@ function HomeScreen(props) {
     data, activeTimer, toggleLog, currentFocus, todayTotal, logTodayTotal,
     homeTab, setHomeTab, addLogOpen, setAddLogOpen, newLogName, setNewLogName, addLog,
     logMenuId, setLogMenuId, renameId, setRenameId, renameVal, setRenameVal, renameLog, deleteLog, moveLog,
-    colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogParent, setSessionNote, setLogStreakGoal,
+    colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogParent, setLogNote, setLogStreakGoal,
     expandedId, setExpandedId, subLogOpen, setSubLogOpen, subLogParentId, setSubLogParentId, subLogName, setSubLogName,
     isOnline, user, syncing, setSkippedLogin, settingsOpen, setSettingsOpen, onExport, onImport,
     manualOpen, setManualOpen, manualLogId, setManualLogId, manualDate, setManualDate,
@@ -997,7 +986,7 @@ function HomeScreen(props) {
                   siblings={topLevelLogs}
                   renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                   logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
-                  setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setSessionNote={setSessionNote} setLogStreakGoal={setLogStreakGoal}
+                  setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote} setLogStreakGoal={setLogStreakGoal}
                   allLogs={data.logs} sessions={data.sessions} onOpenRestore={onOpenRestore}
                   isExpanded={isExpanded} onToggleExpand={() => setExpandedId(isExpanded ? null : log.id)}
                 />
@@ -1010,7 +999,7 @@ function HomeScreen(props) {
                         siblings={children} isChild
                         renameId={renameId} setRenameId={setRenameId} renameVal={renameVal} setRenameVal={setRenameVal} renameLog={renameLog}
                         logMenuId={logMenuId} setLogMenuId={setLogMenuId} colorPickerId={colorPickerId} setColorPickerId={setColorPickerId}
-                        setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setSessionNote={setSessionNote} setLogStreakGoal={setLogStreakGoal}
+                        setLogColor={setLogColor} setLogColorLive={setLogColorLive} setLogParent={setLogParent} deleteLog={deleteLog} moveLog={moveLog} setLogNote={setLogNote} setLogStreakGoal={setLogStreakGoal}
                         allLogs={data.logs} sessions={data.sessions} onOpenRestore={onOpenRestore}
                       />
                     ))}
