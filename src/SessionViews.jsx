@@ -2,10 +2,12 @@ import { useState, useMemo } from "react";
 import { Pencil, ChevronDown, ChevronRight } from "lucide-react";
 import { fmtClock, fmtHMS, rootLogId, todayKey } from "./helpers.js";
 
-// A log's note for a given day: dated notes take priority; for logs that
-// predate the dated-notes feature, fall back to the old single `note` field
-// but only when we're looking at today (it has no date attached).
-function noteFor(log, dateKey) {
+// A session's own note takes priority (this is the per-session note baked in
+// when the session was created). Sessions logged before that feature existed
+// have no `note` field at all (undefined, not "") — for those, fall back to
+// the old shared per-log-per-day note so old history still displays.
+function noteFor(session, log, dateKey) {
+  if (session && session.note !== undefined) return session.note;
   if (!log) return "";
   if (log.notesByDate) return log.notesByDate[dateKey] || "";
   return dateKey === todayKey() ? (log.note || "") : "";
@@ -20,6 +22,7 @@ export function SessionRow({ session, data, scheduleSave, dateKey }) {
   const [hh, setHh] = useState(String(Math.floor(session.duration / 3600)));
   const [mm, setMm] = useState(String(Math.floor((session.duration % 3600) / 60)));
   const log = data.logs.find(l => l.id === session.logId);
+  const [noteDraft, setNoteDraft] = useState(() => noteFor(session, log, dateKey));
 
   function save() {
     let s, e, duration;
@@ -37,7 +40,7 @@ export function SessionRow({ session, data, scheduleSave, dateKey }) {
     }
     scheduleSave({
       ...data,
-      sessions: data.sessions.map(x => x.id === session.id ? { ...x, date, start: s.getTime(), end: e.getTime(), duration } : x),
+      sessions: data.sessions.map(x => x.id === session.id ? { ...x, date, start: s.getTime(), end: e.getTime(), duration, note: noteDraft.trim() } : x),
     });
     setEditing(false);
   }
@@ -75,6 +78,9 @@ export function SessionRow({ session, data, scheduleSave, dateKey }) {
           </div>
         )}
 
+        <textarea value={noteDraft} onChange={e => setNoteDraft(e.target.value)} placeholder="Note for this session"
+          rows={2} className="w-full bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs resize-none" />
+
         <div className="flex gap-2">
           <button onClick={save} className="flex-1 bg-orange-500 text-white rounded py-1.5 text-xs font-medium">Save</button>
           <button onClick={remove} className="px-3 bg-neutral-900 border border-red-900 text-red-400 rounded py-1.5 text-xs">Delete</button>
@@ -84,7 +90,7 @@ export function SessionRow({ session, data, scheduleSave, dateKey }) {
     );
   }
 
-  const note = noteFor(log, dateKey);
+  const note = noteFor(session, log, dateKey);
 
   return (
     <div className="bg-neutral-900 rounded-lg px-3 py-2 text-sm shadow-sm">
@@ -133,7 +139,11 @@ export function GroupedSessionList({ sessions, data, scheduleSave, dateKey }) {
           return <SessionRow key={g.logId} session={g.list[0]} data={data} scheduleSave={scheduleSave} dateKey={dateKey} />;
         }
         const isOpen = !!expanded[g.logId];
-        const groupNote = noteFor(g.log, dateKey);
+        // Each session can have its own note now, so there's no single
+        // "group" note to show while collapsed — preview the most recent
+        // session's note instead (falls back to "" if none has one).
+        const latestWithNote = [...g.list].sort((a, b) => b.start - a.start).find(s => noteFor(s, g.log, dateKey));
+        const groupNote = latestWithNote ? noteFor(latestWithNote, g.log, dateKey) : "";
         return (
           <div key={g.logId} className="bg-neutral-900 rounded-lg overflow-hidden">
             <button onClick={() => setExpanded(e => ({ ...e, [g.logId]: !e[g.logId] }))}

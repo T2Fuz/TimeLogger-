@@ -362,7 +362,15 @@ export default function App() {
         const endedAt = Date.now();
         const duration = Math.round((endedAt - prev.startedAt) / 1000);
         if (duration > 0) {
-          const session = { id: uid(), logId: prev.logId, date: dateKey(prev.startedAt), start: prev.startedAt, end: endedAt, duration };
+          // Bake in a snapshot of the log's current note draft at the moment
+          // this session is finalized, rather than pointing at a shared
+          // per-log-per-day note. This is what session.note captures — once
+          // written it belongs to this session only, so later edits to the
+          // draft (for the next session) can never rewrite history.
+          const sKey = dateKey(prev.startedAt);
+          const draftLog = dataRef.current.logs.find(l => l.id === prev.logId);
+          const noteSnapshot = draftLog?.notesByDate?.[sKey] || "";
+          const session = { id: uid(), logId: prev.logId, date: sKey, start: prev.startedAt, end: endedAt, duration, note: noteSnapshot };
           const nextData = applySessionEffects(dataRef.current, session);
           scheduleSave(nextData);
           checkStreakCelebration(session, nextData.sessions, nextData.logs);
