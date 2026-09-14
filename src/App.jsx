@@ -12,7 +12,7 @@ import {
   fmtHMS, fmtHM, updateAppSettings, fmtClock, fmtAMPM, dateKey, logicalMinutes,
   minutesToClock, todayKey, addDays, startOfWeek, weekdayIdx,
   WEEKDAYS, WEEKDAYS_SHORT3, MONTHS, MONTHS_LONG, fmtLongDate, defaultData, computeStreak,
-  applySessionEffects, detectBrokenStreak, RESTORE_XP_COST, effectiveStreak,
+  applySessionEffects, detectBrokenStreak, RESTORE_XP_COST, effectiveStreak, migrateSessionNotes,
 } from "./helpers.js";
 import { SessionRow, GroupedSessionList } from "./SessionViews.jsx";
 import { StoryGate, StoryHistoryModal } from "./ComebackStory.jsx";
@@ -145,10 +145,13 @@ export default function App() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const local = JSON.parse(raw);
+        const merged = { ...defaultData(), ...local };
         setData({
-          ...defaultData(),
-          ...local,
-          sessions: (local.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
+          ...merged,
+          sessions: migrateSessionNotes(
+            (local.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
+            merged.logs,
+          ),
         });
       }
     } catch (e) { /* nothing saved locally yet */ }
@@ -178,10 +181,13 @@ export default function App() {
       // cloud snapshot just because a cloud copy exists at all.
       const chosen = (cloud && (cloud.updatedAt || 0) >= (local?.updatedAt || 0)) ? cloud : local;
       if (chosen) {
+        const merged = { ...defaultData(), ...chosen };
         const migrated = {
-          ...defaultData(),
-          ...chosen,
-          sessions: (chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
+          ...merged,
+          sessions: migrateSessionNotes(
+            (chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
+            merged.logs,
+          ),
         };
         setData(migrated);
         // If local turned out to be the newer copy (this device had data the
@@ -238,10 +244,13 @@ export default function App() {
       if (!doc || !doc.updatedAt || doc.updatedAt <= lastSavedAtRef.current) return;
       const chosen = doc.payload;
       if (!chosen) return;
+      const merged = { ...defaultData(), ...chosen };
       const migrated = {
-        ...defaultData(),
-        ...chosen,
-        sessions: (chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
+        ...merged,
+        sessions: migrateSessionNotes(
+          (chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
+          merged.logs,
+        ),
       };
       setData(migrated);
     });
@@ -288,7 +297,23 @@ export default function App() {
     const cur = dataRef.current;
     let changed = false;
     const logs = cur.logs.map(l => {
-      const next = detectBrokenStreak(l, cur.sessions, new Date(now));
+      let next = detectBrokenStreak(l, cur.sessions, new Date(now));
+      // Also catch a catch-up target that's already been satisfied but never
+      // got resolved — covers logs stuck pending from before this check
+      // existed, plus the normal case of time crossing the target mid-day.
+      if (next.catchUpTarget) {
+        const todayTotal = cur.sessions
+          .filter(s => s.logId === next.id && s.date === next.catchUpTarget.date)
+          .reduce((a, s) => a + s.duration, 0);
+        if (todayTotal >= next.catchUpTarget.neededSeconds) {
+          next = {
+            ...next,
+            streakOffset: next.brokenStreak?.priorStreak || next.streakOffset || 0,
+            catchUpTarget: null,
+            brokenStreak: null,
+          };
+        }
+      }
       if (next !== l) changed = true;
       return next;
     });
@@ -322,16 +347,37 @@ export default function App() {
         } : l),
       };
     } else if (method === "catchup") {
-      // Doesn't resolve immediately — stays pending (and brokenStreak stays
-      // set, holding the banked amount) until today's logged time actually
-      // covers it, or the person reopens this and picks something else.
-      nextData = {
-        ...nextData,
-        logs: nextData.logs.map(l => l.id === logId ? {
-          ...l,
-          catchUpTarget: { date: todayKey(), neededSeconds: (l.streakGoalSec || 0) * 2 },
-        } : l),
-      };
+      // Check today's already-logged time first — if the person did the
+      // catch-up walk/session *before* opening this modal and picking
+      // catch-up, there's no future session left to trigger the completion
+      // check in applySessionEffects, so it would sit "in progress" forever.
+      // Resolve immediately when today's total already covers it.
+      const neededSeconds = (log.streakGoalSec || 0) * 2;
+      const todayKeyStr = todayKey();
+      const todayTotal = nextData.sessions
+        .filter(s => s.logId === logId && s.date === todayKeyStr)
+        .reduce((a, s) => a + s.duration, 0);
+
+      if (todayTotal >= neededSeconds) {
+        nextData = {
+          ...nextData,
+          logs: nextData.logs.map(l => l.id === logId ? {
+            ...l, catchUpTarget: null,
+            streakOffset: bankedStreak, brokenStreak: null,
+          } : l),
+        };
+      } else {
+        // Doesn't resolve immediately — stays pending (and brokenStreak stays
+        // set, holding the banked amount) until today's logged time actually
+        // covers it, or the person reopens this and picks something else.
+        nextData = {
+          ...nextData,
+          logs: nextData.logs.map(l => l.id === logId ? {
+            ...l,
+            catchUpTarget: { date: todayKeyStr, neededSeconds },
+          } : l),
+        };
+      }
     } else if (method === "lifeline") {
       nextData = {
         ...nextData,
