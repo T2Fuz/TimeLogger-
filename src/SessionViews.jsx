@@ -139,11 +139,6 @@ export function GroupedSessionList({ sessions, data, scheduleSave, dateKey }) {
           return <SessionRow key={g.logId} session={g.list[0]} data={data} scheduleSave={scheduleSave} dateKey={dateKey} />;
         }
         const isOpen = !!expanded[g.logId];
-        // Each session can have its own note now, so there's no single
-        // "group" note to show while collapsed — preview the most recent
-        // session's note instead (falls back to "" if none has one).
-        const latestWithNote = [...g.list].sort((a, b) => b.start - a.start).find(s => noteFor(s, g.log, dateKey));
-        const groupNote = latestWithNote ? noteFor(latestWithNote, g.log, dateKey) : "";
         return (
           <div key={g.logId} className="bg-neutral-900 rounded-lg overflow-hidden">
             <button onClick={() => setExpanded(e => ({ ...e, [g.logId]: !e[g.logId] }))}
@@ -154,12 +149,6 @@ export function GroupedSessionList({ sessions, data, scheduleSave, dateKey }) {
               <span className="text-gray-300 text-xs font-medium">{fmtHMS(g.total)}</span>
               {isOpen ? <ChevronDown size={14} className="text-gray-500" /> : <ChevronRight size={14} className="text-gray-500" />}
             </button>
-            {!isOpen && groupNote && (
-              <div className="flex gap-2 px-3 pb-2 -mt-1">
-                <span className="w-2 h-2 rounded-full shrink-0 mt-1" style={{ backgroundColor: g.log?.color || "#999" }} />
-                <div className="text-xs text-gray-500 whitespace-pre-wrap">{groupNote}</div>
-              </div>
-            )}
             {isOpen && (
               <div className="px-2 pb-2 space-y-1">
                 {g.list.map(s => <SessionRow key={s.id} session={s} data={data} scheduleSave={scheduleSave} dateKey={dateKey} />)}
