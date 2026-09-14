@@ -111,6 +111,19 @@ export function dateKey(d) {
   dt.setHours(dt.getHours() - CURRENT_RESET_HOUR);
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
 }
+// One-time migration for sessions logged before per-session notes existed.
+// A session with no `note` field at all (undefined, not "") was still
+// pointing at the old shared per-log-per-day note, which changes live as
+// the note draft is edited — freeze it as of right now so it stops moving,
+// same as if it had been baked in when the session was created.
+export function migrateSessionNotes(sessions, logs) {
+  return sessions.map(s => {
+    if (s.note !== undefined) return s;
+    const log = logs.find(l => l.id === s.logId);
+    const legacyNote = log?.notesByDate ? (log.notesByDate[s.date] || "") : "";
+    return { ...s, note: legacyNote };
+  });
+}
 // hour-of-day on a 3AM-3AM scale: times before 3AM read as 24:xx-26:xx so they still
 // plot on the previous logical day instead of wrapping to 0
 export function logicalMinutes(ts) {
