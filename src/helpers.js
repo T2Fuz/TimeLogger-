@@ -99,6 +99,14 @@ export function fmtClock(ts) {
   if (CURRENT_TIME_FORMAT === "12h") return fmtAMPM(ts);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+// Always 24-hour "HH:MM", regardless of the display time-format setting.
+// Native <input type="time"> only ever accepts/produces this format, so any
+// code that reads or writes such an input must use this, never fmtClock —
+// feeding it a 12h "11:53 AM" string silently produces an invalid Date.
+export function fmt24(ts) {
+  const d = new Date(ts);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 export function fmtAMPM(ts) {
   const d = new Date(ts);
   let h = d.getHours();
@@ -123,6 +131,15 @@ export function migrateSessionNotes(sessions, logs) {
     const legacyNote = log?.notesByDate ? (log.notesByDate[s.date] || "") : "";
     return { ...s, note: legacyNote };
   });
+}
+// Drops any session left with a NaN/invalid start, end, or duration — this
+// could only happen from the 12h-format edit-form bug (fixed), but any
+// session already corrupted before the fix would otherwise silently break
+// totals and grouping everywhere else in Statistics.
+export function dropCorruptedSessions(sessions) {
+  return sessions.filter(s =>
+    Number.isFinite(s.start) && Number.isFinite(s.end) && Number.isFinite(s.duration) && s.duration > 0
+  );
 }
 // hour-of-day on a 3AM-3AM scale: times before 3AM read as 24:xx-26:xx so they still
 // plot on the previous logical day instead of wrapping to 0

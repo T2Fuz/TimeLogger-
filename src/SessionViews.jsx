@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { Pencil, ChevronDown, ChevronRight } from "lucide-react";
-import { fmtClock, fmtHMS, rootLogId, todayKey } from "./helpers.js";
+import { fmtClock, fmtHMS, fmt24, rootLogId, todayKey } from "./helpers.js";
 
 // A session's own note takes priority (this is the per-session note baked in
 // when the session was created). Sessions logged before that feature existed
@@ -17,8 +17,8 @@ export function SessionRow({ session, data, scheduleSave, dateKey }) {
   const [editing, setEditing] = useState(false);
   const [mode, setMode] = useState("range"); // "range" | "duration"
   const [date, setDate] = useState(session.date);
-  const [start, setStart] = useState(fmtClock(session.start));
-  const [end, setEnd] = useState(fmtClock(session.end));
+  const [start, setStart] = useState(fmt24(session.start));
+  const [end, setEnd] = useState(fmt24(session.end));
   const [hh, setHh] = useState(String(Math.floor(session.duration / 3600)));
   const [mm, setMm] = useState(String(Math.floor((session.duration % 3600) / 60)));
   const log = data.logs.find(l => l.id === session.logId);
@@ -29,15 +29,19 @@ export function SessionRow({ session, data, scheduleSave, dateKey }) {
     if (mode === "duration") {
       s = new Date(`${date}T${start}:00`);
       duration = (parseInt(hh || "0", 10) * 3600) + (parseInt(mm || "0", 10) * 60);
-      if (duration <= 0) return;
+      if (duration <= 0 || isNaN(s.getTime())) return;
       e = new Date(s.getTime() + duration * 1000);
     } else {
       s = new Date(`${date}T${start}:00`);
       e = new Date(`${date}T${end}:00`);
+      if (isNaN(s.getTime()) || isNaN(e.getTime())) return;
       if (e <= s) e = new Date(e.getTime() + 86400000);
       duration = Math.round((e.getTime() - s.getTime()) / 1000);
       if (duration <= 0) return;
     }
+    // Defense in depth: never write a corrupted session, even if some future
+    // change reintroduces a bad input format upstream of this point.
+    if (isNaN(s.getTime()) || isNaN(e.getTime()) || isNaN(duration)) return;
     scheduleSave({
       ...data,
       sessions: data.sessions.map(x => x.id === session.id ? { ...x, date, start: s.getTime(), end: e.getTime(), duration, note: noteDraft.trim() } : x),
