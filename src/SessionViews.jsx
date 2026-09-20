@@ -21,10 +21,31 @@ export function SessionRow({ session, data, scheduleSave, dateKey }) {
   const [end, setEnd] = useState(fmt24(session.end));
   const [hh, setHh] = useState(String(Math.floor(session.duration / 3600)));
   const [mm, setMm] = useState(String(Math.floor((session.duration % 3600) / 60)));
+  // Time inputs only have minute precision (no seconds), so recomputing
+  // start/end/duration from them on every save would silently round away
+  // any sub-minute precision — even on a save that only changed the note.
+  // Only recompute when the person actually touched a time/date/mode field.
+  const [timeTouched, setTimeTouched] = useState(false);
   const log = data.logs.find(l => l.id === session.logId);
   const [noteDraft, setNoteDraft] = useState(() => noteFor(session, log, dateKey));
 
   function save() {
+    if (!timeTouched) {
+      // Only the note and/or date may have changed. If the date changed,
+      // shift the original start/end by that many days so the exact
+      // time-of-day (seconds included) survives; if not, leave them alone.
+      let newStart = session.start, newEnd = session.end;
+      if (date !== session.date) {
+        const deltaMs = new Date(`${date}T00:00:00`).getTime() - new Date(`${session.date}T00:00:00`).getTime();
+        if (!isNaN(deltaMs)) { newStart = session.start + deltaMs; newEnd = session.end + deltaMs; }
+      }
+      scheduleSave({
+        ...data,
+        sessions: data.sessions.map(x => x.id === session.id ? { ...x, date, start: newStart, end: newEnd, note: noteDraft.trim() } : x),
+      });
+      setEditing(false);
+      return;
+    }
     let s, e, duration;
     if (mode === "duration") {
       s = new Date(`${date}T${start}:00`);
@@ -61,23 +82,23 @@ export function SessionRow({ session, data, scheduleSave, dateKey }) {
         </div>
 
         <div className="flex gap-2">
-          <button onClick={() => setMode("range")} className={`flex-1 py-1 rounded text-[11px] font-medium ${mode === "range" ? "bg-orange-500 text-white" : "bg-neutral-900 border border-neutral-700 text-gray-400"}`}>Start / End</button>
-          <button onClick={() => setMode("duration")} className={`flex-1 py-1 rounded text-[11px] font-medium ${mode === "duration" ? "bg-orange-500 text-white" : "bg-neutral-900 border border-neutral-700 text-gray-400"}`}>Hours / Minutes</button>
+          <button onClick={() => { setMode("range"); setTimeTouched(true); }} className={`flex-1 py-1 rounded text-[11px] font-medium ${mode === "range" ? "bg-orange-500 text-white" : "bg-neutral-900 border border-neutral-700 text-gray-400"}`}>Start / End</button>
+          <button onClick={() => { setMode("duration"); setTimeTouched(true); }} className={`flex-1 py-1 rounded text-[11px] font-medium ${mode === "duration" ? "bg-orange-500 text-white" : "bg-neutral-900 border border-neutral-700 text-gray-400"}`}>Hours / Minutes</button>
         </div>
 
         <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs" />
 
         {mode === "range" ? (
           <div className="flex gap-2">
-            <input type="time" value={start} onChange={e => setStart(e.target.value)} className="flex-1 bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs" />
-            <input type="time" value={end} onChange={e => setEnd(e.target.value)} className="flex-1 bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs" />
+            <input type="time" value={start} onChange={e => { setStart(e.target.value); setTimeTouched(true); }} className="flex-1 bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs" />
+            <input type="time" value={end} onChange={e => { setEnd(e.target.value); setTimeTouched(true); }} className="flex-1 bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs" />
           </div>
         ) : (
           <div className="flex gap-2 items-center">
-            <input type="time" value={start} onChange={e => setStart(e.target.value)} className="flex-1 bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs" title="Start time" />
-            <input type="number" min="0" value={hh} onChange={e => setHh(e.target.value)} className="w-14 bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs text-center" />
+            <input type="time" value={start} onChange={e => { setStart(e.target.value); setTimeTouched(true); }} className="flex-1 bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs" title="Start time" />
+            <input type="number" min="0" value={hh} onChange={e => { setHh(e.target.value); setTimeTouched(true); }} className="w-14 bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs text-center" />
             <span className="text-gray-500 text-xs">h</span>
-            <input type="number" min="0" max="59" value={mm} onChange={e => setMm(e.target.value)} className="w-14 bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs text-center" />
+            <input type="number" min="0" max="59" value={mm} onChange={e => { setMm(e.target.value); setTimeTouched(true); }} className="w-14 bg-neutral-900 border border-neutral-700 text-gray-100 rounded px-2 py-1 text-xs text-center" />
             <span className="text-gray-500 text-xs">m</span>
           </div>
         )}
