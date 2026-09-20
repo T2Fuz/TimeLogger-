@@ -139,7 +139,13 @@ export function GroupedSessionList({ sessions, data, scheduleSave, dateKey }) {
   return (
     <div className="space-y-1.5">
       {groups.map(g => {
-        if (g.list.length === 1) {
+        // Only render flat (skip the parent-log wrapper) when the single
+        // session's own log IS the top-level log — i.e. it has no parent.
+        // A single session under a sub-log (e.g. one Higher Math entry under
+        // Study) must still show grouped under its parent, same as when
+        // there are multiple sessions — otherwise it looks like a top-level
+        // log that doesn't exist.
+        if (g.list.length === 1 && g.list[0].logId === g.logId) {
           return <SessionRow key={g.logId} session={g.list[0]} data={data} scheduleSave={scheduleSave} dateKey={dateKey} />;
         }
         const isOpen = !!expanded[g.logId];
