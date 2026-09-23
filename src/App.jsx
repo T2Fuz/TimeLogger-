@@ -12,11 +12,13 @@ import {
   fmtHMS, fmtHM, updateAppSettings, fmtClock, fmtAMPM, dateKey, logicalMinutes,
   minutesToClock, todayKey, addDays, startOfWeek, weekdayIdx,
   WEEKDAYS, WEEKDAYS_SHORT3, MONTHS, MONTHS_LONG, fmtLongDate, defaultData, computeStreak,
-  applySessionEffects, detectBrokenStreak, RESTORE_XP_COST, effectiveStreak, migrateSessionNotes, dropCorruptedSessions,
+  applySessionEffects, detectBrokenStreak, RESTORE_XP_COST, effectiveStreak,
+  prepareLoadedData, pushSnapshot, logicalDateTime,
 } from "./helpers.js";
 import { SessionRow, GroupedSessionList } from "./SessionViews.jsx";
 import { StoryGate, StoryHistoryModal } from "./ComebackStory.jsx";
 import { StreakRestoreModal, HeaderXpBadge, RestorePill } from "./Xp.jsx";
+import RecoveryPanel from "./Recovery.jsx";
 // Statistics uses recharts (the app's single heaviest dependency) — loading
 // it lazily means it's only downloaded when the person actually opens the
 // Statistics tab, instead of on every app open. This is the main fix for
@@ -145,14 +147,11 @@ export default function App() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const local = JSON.parse(raw);
-        const merged = { ...defaultData(), ...local };
-        setData({
-          ...merged,
-          sessions: migrateSessionNotes(
-            dropCorruptedSessions(local.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
-            merged.logs,
-          ),
-        });
+        pushSnapshot(local, "app open", { mode: "auto" });
+        // prepareLoadedData applies the saved day-reset hour BEFORE deriving
+        // any session's day, and repairs/quarantines bad rows instead of
+        // deleting them.
+        setData(prepareLoadedData(local));
       }
     } catch (e) { /* nothing saved locally yet */ }
     setLoaded(true);
@@ -181,14 +180,15 @@ export default function App() {
       // cloud snapshot just because a cloud copy exists at all.
       const chosen = (cloud && (cloud.updatedAt || 0) >= (local?.updatedAt || 0)) ? cloud : local;
       if (chosen) {
-        const merged = { ...defaultData(), ...chosen };
-        const migrated = {
-          ...merged,
-          sessions: migrateSessionNotes(
-            dropCorruptedSessions(chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
-            merged.logs,
-          ),
-        };
+        // About to replace this device's copy with the cloud one: keep the
+        // local copy as a snapshot first (forced when the cloud copy is
+        // smaller, which is the signature of lost data).
+        if (local && chosen === cloud) {
+          const smaller = (cloud.sessions || []).length < (local.sessions || []).length
+            || (cloud.logs || []).length < (local.logs || []).length;
+          pushSnapshot(local, "before cloud sync", { mode: smaller ? "protect" : "auto" });
+        }
+        const migrated = prepareLoadedData(chosen);
         setData(migrated);
         // If local turned out to be the newer copy (this device had data the
         // cloud didn't have yet, or a save never made it up before a reload),
@@ -244,15 +244,14 @@ export default function App() {
       if (!doc || !doc.updatedAt || doc.updatedAt <= lastSavedAtRef.current) return;
       const chosen = doc.payload;
       if (!chosen) return;
-      const merged = { ...defaultData(), ...chosen };
-      const migrated = {
-        ...merged,
-        sessions: migrateSessionNotes(
-          dropCorruptedSessions(chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
-          merged.logs,
-        ),
-      };
-      setData(migrated);
+      const cur = dataRef.current;
+      // Never let an older copy (an echo of our own save, or a stale cache
+      // snapshot at startup) overwrite newer changes already in memory.
+      if ((chosen.updatedAt || 0) <= (cur.updatedAt || 0)) return;
+      const smaller = (chosen.sessions || []).length < (cur.sessions || []).length
+        || (chosen.logs || []).length < (cur.logs || []).length;
+      pushSnapshot(cur, "before live sync", { mode: smaller ? "protect" : "auto" });
+      setData(prepareLoadedData(chosen));
     });
     return unsub;
   }, [user]);
@@ -518,12 +517,15 @@ export default function App() {
     let duration = 0, startTs = null, endTs = null;
     if (manualMode === "duration") {
       duration = (parseInt(manualH || "0", 10) * 3600) + (parseInt(manualM || "0", 10) * 60);
-      const base = new Date(manualDate + "T12:00:00");
+      const base = logicalDateTime(manualDate, "12:00");
       startTs = base.getTime();
       endTs = startTs + duration * 1000;
     } else {
-      const s = new Date(`${manualDate}T${manualStart}:00`);
-      let e = new Date(`${manualDate}T${manualEnd}:00`);
+      // Times before the day-reset hour belong to the night after the picked
+      // day, so the entry stays filed under the day that was chosen.
+      const s = logicalDateTime(manualDate, manualStart);
+      let e = logicalDateTime(manualDate, manualEnd);
+      if (isNaN(s.getTime()) || isNaN(e.getTime())) return;
       if (e <= s) e = new Date(e.getTime() + 86400000);
       startTs = s.getTime(); endTs = e.getTime();
       duration = Math.round((endTs - startTs) / 1000);
@@ -565,6 +567,15 @@ export default function App() {
       URL.revokeObjectURL(url);
     } catch (e) {}
   }
+  // Swaps in a whole new copy of the data (import, snapshot restore, repair).
+  // The current copy is snapshotted first, and the result is pushed to the
+  // cloud immediately so a quick reload can't race the debounce and lose it.
+  function replaceAllData(raw, reason) {
+    pushSnapshot(dataRef.current, reason || "before replace", { mode: "manual" });
+    const stamped = scheduleSave(prepareLoadedData(raw));
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    persist(stamped);
+  }
   function handleImport(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -572,13 +583,21 @@ export default function App() {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        // An explicit import should win outright and land in the cloud
-        // immediately — no waiting on the debounce, which a quick reload
-        // right after importing could otherwise race and lose.
-        const stamped = scheduleSave({ ...defaultData(), ...parsed });
-        if (saveTimer.current) clearTimeout(saveTimer.current);
-        persist(stamped);
-      } catch (err) {}
+        // A backup must look like a backup — importing something without
+        // logs/sessions would otherwise wipe everything with an empty app.
+        if (!parsed || !Array.isArray(parsed.logs) || !Array.isArray(parsed.sessions)) {
+          window.alert("That file doesn't look like a TimeLogger backup, so nothing was changed.");
+          return;
+        }
+        const cur = dataRef.current;
+        const ok = window.confirm(
+          `Replace your current data (${cur.logs.length} timers, ${cur.sessions.length} sessions) with this backup (${parsed.logs.length} timers, ${parsed.sessions.length} sessions)?\n\nYour current data is saved as a snapshot first, so you can undo this from Settings → Data recovery.`
+        );
+        if (!ok) return;
+        replaceAllData(parsed, "before import");
+      } catch (err) {
+        window.alert("Couldn't read that file, so nothing was changed.");
+      }
     };
     reader.readAsText(file);
     e.target.value = "";
@@ -668,7 +687,7 @@ export default function App() {
           settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen}
           onOpenRestore={setRestoreModalLogId}
           setStoryHistoryOpen={setStoryHistoryOpen}
-          onExport={handleExport} onImport={handleImport}
+          onExport={handleExport} onImport={handleImport} replaceAllData={replaceAllData}
           now={now}
         />
       )}
@@ -1108,7 +1127,11 @@ function HomeScreen(props) {
           <p className="text-[11px] text-gray-500 mb-2">A new "day" starts at this hour. Anything logged before it still counts toward the previous day — handy if you stay up past midnight.</p>
           <select
             value={data.settings?.dayResetHour ?? 3}
-            onChange={e => props.scheduleSave({ ...data, settings: { ...(data.settings || {}), dayResetHour: Number(e.target.value) } })}
+            onChange={e => {
+              const settings = { ...(data.settings || {}), dayResetHour: Number(e.target.value) };
+              updateAppSettings(settings); // must be in effect before re-deriving days below
+              props.scheduleSave({ ...data, settings, sessions: data.sessions.map(x => ({ ...x, date: dateKey(x.start) })) });
+            }}
             className="w-full border border-neutral-700 bg-neutral-900 text-gray-100 rounded-lg px-3 py-2 text-sm">
             {Array.from({ length: 24 }, (_, h) => (
               <option key={h} value={h}>{h === 0 ? "12:00 AM (midnight)" : h < 12 ? `${h}:00 AM` : h === 12 ? "12:00 PM (noon)" : `${h - 12}:00 PM`}</option>
@@ -1159,6 +1182,8 @@ function HomeScreen(props) {
             </div>
           </div>
         )}
+
+        <RecoveryPanel data={data} exportData={onExport} replaceAllData={props.replaceAllData} />
       </Modal>
 
       <Modal open={addLogOpen} onClose={() => setAddLogOpen(false)} title="Add log name">
