@@ -158,53 +158,47 @@ export default function App() {
     setLoaded(true);
   }, []);
 
-  // ---------- load: local data instantly, cloud data in the background ----------
-  // Show the local copy right away (zero network wait — this is the whole
-  // point of offline-first) instead of blocking the loading screen on a
-  // round-trip to Firestore. Once the cloud fetch resolves, merge it in
-  // quietly if it turns out to be newer.
+  // ---------- load: cloud data, once auth resolves ----------
+  // Always read from the local copy first (works fully offline, instant).
+  // Once logged in, also check the cloud copy and use whichever is newer.
   useEffect(() => {
     if (user === undefined) return; // wait until auth state is known
+    (async () => {
+      let local = null;
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) local = JSON.parse(raw);
+      } catch (e) { /* nothing saved locally yet */ }
 
-    let local = null;
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) local = JSON.parse(raw);
-    } catch (e) { /* nothing saved locally yet */ }
-
-    function applyChosen(chosen, isLocalCopy) {
-      if (!chosen) return;
-      const merged = { ...defaultData(), ...chosen };
-      const migrated = {
-        ...merged,
-        sessions: migrateSessionNotes(
-          dropCorruptedSessions(chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
-          merged.logs,
-        ),
-      };
-      setData(migrated);
-      // If local turned out to be the newer copy (this device had data the
-      // cloud didn't have yet, or a save never made it up before a reload),
-      // push it up right away — don't wait for the next log entry.
-      if (user && isLocalCopy) persist(migrated);
-    }
-
-    applyChosen(local, true);
-    setLoaded(true); // show the UI now — don't wait on the network below
-
-    if (user) {
-      (async () => {
-        let cloud = null;
+      let cloud = null;
+      if (user) {
         try { cloud = await loadCloudData(user.uid); } catch (e) { /* offline, that's fine */ }
-        // Compare against whatever is actually on screen right now (which
-        // may have changed since this effect started, if the person acted
-        // in the app before the cloud fetch resolved) — not the `local`
-        // snapshot captured at mount, which would be stale by now.
-        if (cloud && (cloud.updatedAt || 0) >= (dataRef.current?.updatedAt || 0)) {
-          applyChosen(cloud, false);
+      }
+
+      // Pick whichever copy was actually saved more recently — a device
+      // that's been offline (or a reload that raced the debounced cloud
+      // write) shouldn't have its newer local data clobbered by an older
+      // cloud snapshot just because a cloud copy exists at all.
+      const chosen = (cloud && (cloud.updatedAt || 0) >= (local?.updatedAt || 0)) ? cloud : local;
+      if (chosen) {
+        const merged = { ...defaultData(), ...chosen };
+        const migrated = {
+          ...merged,
+          sessions: migrateSessionNotes(
+            dropCorruptedSessions(chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
+            merged.logs,
+          ),
+        };
+        setData(migrated);
+        // If local turned out to be the newer copy (this device had data the
+        // cloud didn't have yet, or a save never made it up before a reload),
+        // push it up right away — don't wait for the next log entry.
+        if (user && chosen === local) {
+          persist(migrated);
         }
-      })();
-    }
+      }
+      setLoaded(true);
+    })();
   }, [user]);
 
   useEffect(() => {
