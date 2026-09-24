@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { Pencil, ChevronDown, ChevronRight } from "lucide-react";
-import { fmtClock, fmtHMS, fmt24, rootLogId, todayKey, logicalDateTime } from "./helpers.js";
+import { fmtClock, fmtHMS, fmt24, rootLogId, todayKey } from "./helpers.js";
 
 // A session's own note takes priority (this is the per-session note baked in
 // when the session was created). Sessions logged before that feature existed
@@ -48,15 +48,13 @@ export function SessionRow({ session, data, scheduleSave, dateKey }) {
     }
     let s, e, duration;
     if (mode === "duration") {
-      s = logicalDateTime(date, start);
+      s = new Date(`${date}T${start}:00`);
       duration = (parseInt(hh || "0", 10) * 3600) + (parseInt(mm || "0", 10) * 60);
       if (duration <= 0 || isNaN(s.getTime())) return;
       e = new Date(s.getTime() + duration * 1000);
     } else {
-      // Times earlier than the day-reset hour belong to the night after the
-      // chosen day, so the session stays filed under the day that was picked.
-      s = logicalDateTime(date, start);
-      e = logicalDateTime(date, end);
+      s = new Date(`${date}T${start}:00`);
+      e = new Date(`${date}T${end}:00`);
       if (isNaN(s.getTime()) || isNaN(e.getTime())) return;
       if (e <= s) e = new Date(e.getTime() + 86400000);
       duration = Math.round((e.getTime() - s.getTime()) / 1000);

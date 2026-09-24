@@ -132,6 +132,14 @@ export function migrateSessionNotes(sessions, logs) {
     return { ...s, note: legacyNote };
   });
 }
+// A session with a non-finite start/end/duration (could only happen from the
+// 12h-format edit-form bug, since fixed) is never deleted — that silently
+// destroyed real logged history when it happened to misfire. Instead its
+// duration is neutralized to 0 so it can't turn totals into NaN, while the
+// record itself (and its note) stays visible and editable.
+export function sanitizeSession(s) {
+  return Number.isFinite(s.duration) ? s : { ...s, duration: 0 };
+}
 // hour-of-day on a 3AM-3AM scale: times before 3AM read as 24:xx-26:xx so they still
 // plot on the previous logical day instead of wrapping to 0
 export function logicalMinutes(ts) {
@@ -214,9 +222,6 @@ export function defaultData() {
     // Bumped on every save (see scheduleSave) — lets the cloud-vs-local load
     // pick whichever copy is actually newer instead of always trusting one.
     updatedAt: 0,
-    // Sessions that were unreadable (no usable start time) are parked here
-    // instead of being deleted, so nothing is ever silently thrown away.
-    quarantine: [],
   };
 }
 
@@ -379,172 +384,3 @@ export function detectBrokenStreak(log, sessions, now) {
   return { ...log, lastBrokenCheck: yKey, brokenStreak: { dates: missedDates, priorStreak } };
 }
 
-
-// ===================== logical-day timestamps =====================
-// Builds a real timestamp from a "logical day" + clock time picked in a form.
-// A time earlier than the day-reset hour (e.g. 01:00 with a 3am reset) belongs
-// to the NIGHT AFTER that day, so it lands on the next calendar date. This
-// keeps dateKey(start) === the day the person picked — before, a manual entry
-// like "Mon 01:00" was stored under Monday, then silently moved to Sunday the
-// next time the app reloaded and re-derived the day from the start time.
-export function logicalDateTime(dateStr, hhmm) {
-  const d = new Date(`${dateStr}T${hhmm}:00`);
-  if (isNaN(d.getTime())) return d;
-  if (d.getHours() < CURRENT_RESET_HOUR) d.setDate(d.getDate() + 1);
-  return d;
-}
-
-// ===================== load-time data safety =====================
-function toNum(v) {
-  if (typeof v === "number") return v;
-  if (typeof v === "string" && v.trim() !== "") return Number(v);
-  return NaN;
-}
-
-// Repairs what can be repaired and separates what can't. NOTHING is deleted
-// here: unrecoverable rows are returned in `quarantined` for the caller to keep.
-export function repairSessions(list) {
-  const kept = [];
-  const quarantined = [];
-  const seen = new Map(); // id -> fingerprint
-  (Array.isArray(list) ? list : []).forEach(raw => {
-    if (!raw || typeof raw !== "object") return;
-    const s = { ...raw };
-    s.start = toNum(s.start); s.end = toNum(s.end); s.duration = toNum(s.duration);
-    const hasStart = Number.isFinite(s.start);
-    const hasEnd = Number.isFinite(s.end);
-    const hasDur = Number.isFinite(s.duration) && s.duration > 0;
-    if (hasStart && hasEnd && !hasDur) s.duration = Math.round((s.end - s.start) / 1000);
-    else if (hasStart && !hasEnd && hasDur) s.end = s.start + s.duration * 1000;
-    else if (!hasStart && hasEnd && hasDur) s.start = s.end - s.duration * 1000;
-    const ok = Number.isFinite(s.start) && Number.isFinite(s.end) && Number.isFinite(s.duration) && s.duration > 0 && !!s.logId;
-    if (!ok) { quarantined.push(raw); return; }
-    if (!s.id) s.id = uid();
-    const fp = `${s.logId}|${s.start}|${s.end}`;
-    if (seen.has(s.id)) {
-      if (seen.get(s.id) === fp) return; // byte-for-byte copy of a row already kept
-      s.id = uid(); // same id, different session: keep both
-    }
-    seen.set(s.id, fp);
-    kept.push(s);
-  });
-  return { sessions: kept, quarantined };
-}
-
-// The ONE place any stored/cloud/imported copy of the data goes through before
-// the app uses it. Order matters: the saved day-reset hour must be applied
-// BEFORE any dateKey() call. Previously the load code ran dateKey() while the
-// module still held the default 3am, so anyone with a different reset hour had
-// every session's day re-derived with the wrong hour on each app open.
-export function prepareLoadedData(raw) {
-  const base = defaultData();
-  const merged = { ...base, ...(raw || {}) };
-  merged.settings = { ...base.settings, ...((raw && raw.settings) || {}) };
-  updateAppSettings(merged.settings);
-  if (!Array.isArray(merged.logs)) merged.logs = [];
-  const { sessions: repaired, quarantined } = repairSessions(merged.sessions);
-  const sessions = migrateSessionNotes(
-    repaired.map(s => ({ ...s, date: dateKey(s.start) })),
-    merged.logs,
-  );
-  let quarantine = Array.isArray(merged.quarantine) ? merged.quarantine : [];
-  if (quarantined.length) {
-    const have = new Set(quarantine.map(q => JSON.stringify(q)));
-    quarantined.forEach(q => {
-      const k = JSON.stringify(q);
-      if (!have.has(k)) { have.add(k); quarantine = [...quarantine, q]; }
-    });
-  }
-  return { ...merged, sessions, quarantine };
-}
-
-// ===================== health check + repair =====================
-export function auditData(data) {
-  const logs = Array.isArray(data?.logs) ? data.logs : [];
-  const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
-  const logIds = new Set(logs.map(l => l.id));
-  const orphanIds = new Set();
-  let orphanSessions = 0, duplicates = 0, totalSec = 0;
-  const seen = new Set();
-  sessions.forEach(s => {
-    totalSec += s.duration || 0;
-    if (!logIds.has(s.logId)) { orphanIds.add(s.logId); orphanSessions++; }
-    const fp = `${s.logId}|${s.start}|${s.end}`;
-    if (seen.has(fp)) duplicates++; else seen.add(fp);
-  });
-  const badParents = logs.filter(l => l.parentId && !logIds.has(l.parentId) && !orphanIds.has(l.parentId)).length;
-  return {
-    logCount: logs.length,
-    sessionCount: sessions.length,
-    totalSec,
-    orphanLogCount: orphanIds.size,
-    orphanSessions,
-    duplicates,
-    badParents,
-    quarantined: Array.isArray(data?.quarantine) ? data.quarantine.length : 0,
-  };
-}
-
-// Non-destructive fixes only: sessions whose timer vanished get a placeholder
-// timer to live under (rename it afterwards), sub-logs pointing at a missing
-// parent become top-level, and exact duplicate sessions collapse to one.
-export function repairData(data) {
-  const logs = [...(data.logs || [])];
-  const ids = new Set(logs.map(l => l.id));
-  const orphans = [];
-  (data.sessions || []).forEach(s => { if (!ids.has(s.logId) && !orphans.includes(s.logId)) orphans.push(s.logId); });
-  orphans.forEach((id, i) => {
-    logs.push({ id, name: `Recovered timer ${i + 1}`, color: COLORS[logs.length % COLORS.length], parentId: null });
-    ids.add(id);
-  });
-  const fixedLogs = logs.map(l => (l.parentId && !ids.has(l.parentId)) ? { ...l, parentId: null } : l);
-  const seen = new Set();
-  const sessions = (data.sessions || []).filter(s => {
-    const fp = `${s.logId}|${s.start}|${s.end}`;
-    if (seen.has(fp)) return false;
-    seen.add(fp);
-    return true;
-  });
-  return { ...data, logs: fixedLogs, sessions };
-}
-
-// ===================== automatic local snapshots =====================
-// A rolling set of full copies kept on THIS device, taken right before other
-// data (from the cloud, an import, a repair) replaces what's here. If a bad
-// version of the app — or a bad sync — ever damages the data again, the last
-// good copy is still one tap away in Settings → Data recovery.
-export const SNAPSHOT_KEY = "timelogger-snapshots-v1";
-const MAX_SNAPSHOTS = 8;
-const GAP_MS = { auto: 6 * 3600 * 1000, protect: 2 * 60 * 1000, manual: 0 };
-
-export function readSnapshots() {
-  try {
-    const list = JSON.parse(localStorage.getItem(SNAPSHOT_KEY) || "[]");
-    return Array.isArray(list) ? list : [];
-  } catch (e) { return []; }
-}
-function snapshotSig(d) {
-  const sessions = Array.isArray(d.sessions) ? d.sessions : [];
-  let total = 0;
-  sessions.forEach(s => { total += Number(s.duration) || 0; });
-  return `${(d.logs || []).length}|${sessions.length}|${total}`;
-}
-export function pushSnapshot(data, reason, { mode = "auto" } = {}) {
-  try {
-    if (!data || !Array.isArray(data.sessions) || !Array.isArray(data.logs)) return;
-    if (data.sessions.length === 0 && data.logs.length === 0) return;
-    const snaps = readSnapshots();
-    const sig = snapshotSig(data);
-    const last = snaps[0];
-    if (last && last.sig === sig) return;
-    if (last && Date.now() - last.at < (GAP_MS[mode] ?? GAP_MS.auto)) return;
-    let total = 0;
-    data.sessions.forEach(s => { total += Number(s.duration) || 0; });
-    const entry = { at: Date.now(), reason, sig, logs: data.logs.length, sessions: data.sessions.length, totalSec: total, data };
-    let next = [entry, ...snaps].slice(0, MAX_SNAPSHOTS);
-    while (next.length > 0) {
-      try { localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(next)); return; }
-      catch (e) { next = next.slice(0, -1); } // storage full: drop the oldest and retry
-    }
-  } catch (e) { /* snapshots are best-effort; never break the app over them */ }
-}
