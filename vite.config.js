@@ -34,18 +34,7 @@ export default defineConfig({
     })
   ],
   build: {
-    modulePreload: {
-      // Preload every chunk the entry needs EXCEPT the charts bundle.
-      // Before, modulePreload:false skipped preloading for ALL chunks
-      // (including firebase/auth+firestore), forcing the browser to
-      // discover and fetch them one-by-one only after parsing the main
-      // bundle — that serial waterfall is what was delaying auth/sync on
-      // open. Now firebase + icons preload in parallel like normal, and
-      // only the recharts/Statistics chunk stays lazy (fetched on demand
-      // when that tab is opened), which is the only thing we actually
-      // wanted to defer.
-      resolveDependencies: (filename, deps) => deps.filter((dep) => !dep.includes("charts")),
-    },
+    modulePreload: false,
     rollupOptions: {
       output: {
         manualChunks: {
