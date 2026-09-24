@@ -77,13 +77,22 @@ export function watchCloudData(uid, cb) {
 // which one" — kept apart from the big data document so starting/stopping
 // a timer is instant on other devices, without waiting for (or triggering)
 // a full data re-sync.
-export async function setCloudActiveTimer(uid, activeTimer) {
+export async function setCloudActiveTimer(uid, activeTimer, pushedAt) {
   const ref = doc(db, "users", uid, "meta", "activeTimer");
-  await setDoc(ref, { activeTimer: activeTimer || null, updatedAt: Date.now() });
+  await setDoc(ref, { activeTimer: activeTimer || null, updatedAt: pushedAt || Date.now() });
 }
 export function watchCloudActiveTimer(uid, cb) {
   const ref = doc(db, "users", uid, "meta", "activeTimer");
   return onSnapshot(ref, (snap) => {
-    cb(snap.exists() ? (snap.data().activeTimer || null) : null);
+    // Pass the doc's updatedAt through too (previously discarded) — the
+    // caller needs it to tell "this snapshot predates something I just did
+    // locally" apart from "this is a genuine change from another device".
+    // Without it, the very first snapshot delivered right after this
+    // listener attaches can carry the pre-start value and stomp a timer
+    // that was started locally moments earlier, before this listener was
+    // even up and running.
+    if (!snap.exists()) { cb(null, 0); return; }
+    const d = snap.data();
+    cb(d.activeTimer || null, d.updatedAt || 0);
   }, (err) => console.error("Active timer listener error:", err));
 }

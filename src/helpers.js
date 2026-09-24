@@ -132,14 +132,13 @@ export function migrateSessionNotes(sessions, logs) {
     return { ...s, note: legacyNote };
   });
 }
-// Drops any session left with a NaN/invalid start, end, or duration — this
-// could only happen from the 12h-format edit-form bug (fixed), but any
-// session already corrupted before the fix would otherwise silently break
-// totals and grouping everywhere else in Statistics.
-export function dropCorruptedSessions(sessions) {
-  return sessions.filter(s =>
-    Number.isFinite(s.start) && Number.isFinite(s.end) && Number.isFinite(s.duration) && s.duration > 0
-  );
+// A session with a non-finite start/end/duration (could only happen from the
+// 12h-format edit-form bug, since fixed) is never deleted — that silently
+// destroyed real logged history when it happened to misfire. Instead its
+// duration is neutralized to 0 so it can't turn totals into NaN, while the
+// record itself (and its note) stays visible and editable.
+export function sanitizeSession(s) {
+  return Number.isFinite(s.duration) ? s : { ...s, duration: 0 };
 }
 // hour-of-day on a 3AM-3AM scale: times before 3AM read as 24:xx-26:xx so they still
 // plot on the previous logical day instead of wrapping to 0

@@ -12,7 +12,7 @@ import {
   fmtHMS, fmtHM, updateAppSettings, fmtClock, fmtAMPM, dateKey, logicalMinutes,
   minutesToClock, todayKey, addDays, startOfWeek, weekdayIdx,
   WEEKDAYS, WEEKDAYS_SHORT3, MONTHS, MONTHS_LONG, fmtLongDate, defaultData, computeStreak,
-  applySessionEffects, detectBrokenStreak, RESTORE_XP_COST, effectiveStreak, migrateSessionNotes, dropCorruptedSessions,
+  applySessionEffects, detectBrokenStreak, RESTORE_XP_COST, effectiveStreak, migrateSessionNotes, sanitizeSession,
 } from "./helpers.js";
 import { SessionRow, GroupedSessionList } from "./SessionViews.jsx";
 import { StoryGate, StoryHistoryModal } from "./ComebackStory.jsx";
@@ -92,6 +92,11 @@ export default function App() {
       return raw ? JSON.parse(raw) : null;
     } catch (e) { return null; }
   });
+  // Timestamp of the most recent LOCAL start/stop we pushed to the cloud.
+  // Used to ignore any activeTimer snapshot older than our own latest local
+  // action, so a stale first-connect snapshot can't stomp a timer we just
+  // started on this device (see toggleLog and the watchCloudActiveTimer effect).
+  const lastPushedTimerAtRef = useRef(0);
   const [now, setNow] = useState(Date.now());
   const [nav, setNav] = useState("home");
   const [homeTab, setHomeTab] = useState("timer");
@@ -149,7 +154,7 @@ export default function App() {
         setData({
           ...merged,
           sessions: migrateSessionNotes(
-            dropCorruptedSessions(local.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
+            (local.sessions || []).map(s => sanitizeSession({ ...s, date: dateKey(s.start) })),
             merged.logs,
           ),
         });
@@ -185,7 +190,7 @@ export default function App() {
         const migrated = {
           ...merged,
           sessions: migrateSessionNotes(
-            dropCorruptedSessions(chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
+            (chosen.sessions || []).map(s => sanitizeSession({ ...s, date: dateKey(s.start) })),
             merged.logs,
           ),
         };
@@ -248,7 +253,7 @@ export default function App() {
       const migrated = {
         ...merged,
         sessions: migrateSessionNotes(
-          dropCorruptedSessions(chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
+          (chosen.sessions || []).map(s => sanitizeSession({ ...s, date: dateKey(s.start) })),
           merged.logs,
         ),
       };
@@ -262,7 +267,15 @@ export default function App() {
   // in real time, without needing to stop it first.
   useEffect(() => {
     if (!user) return;
-    const unsub = watchCloudActiveTimer(user.uid, (remote) => {
+    const unsub = watchCloudActiveTimer(user.uid, (remote, remoteUpdatedAt) => {
+      // A snapshot older than the last start/stop we pushed ourselves is
+      // stale — most commonly the very first snapshot this listener gets
+      // right after connecting, which can carry the pre-start value from
+      // before we opened the app. Applying it would silently kill a timer
+      // we just started. A genuinely newer remote change (e.g. you started
+      // or stopped it from another device) always has a newer timestamp
+      // and still comes through normally.
+      if ((remoteUpdatedAt || 0) < lastPushedTimerAtRef.current) return;
       setActiveTimer((current) => {
         if (JSON.stringify(current) === JSON.stringify(remote)) return current;
         return remote;
@@ -425,7 +438,11 @@ export default function App() {
       } else {
         next = { logId, startedAt: Date.now() };
       }
-      if (user) setCloudActiveTimer(user.uid, next).catch(() => {});
+      if (user) {
+        const pushedAt = Date.now();
+        lastPushedTimerAtRef.current = pushedAt;
+        setCloudActiveTimer(user.uid, next, pushedAt).catch(() => {});
+      }
       return next;
     });
   }
