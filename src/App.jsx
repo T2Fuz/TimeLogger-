@@ -12,7 +12,7 @@ import {
   fmtHMS, fmtHM, updateAppSettings, fmtClock, fmtAMPM, dateKey, logicalMinutes,
   minutesToClock, todayKey, addDays, startOfWeek, weekdayIdx,
   WEEKDAYS, WEEKDAYS_SHORT3, MONTHS, MONTHS_LONG, fmtLongDate, defaultData, computeStreak,
-  applySessionEffects, detectBrokenStreak, RESTORE_XP_COST, effectiveStreak, migrateSessionNotes, sanitizeSession,
+  applySessionEffects, detectBrokenStreak, RESTORE_XP_COST, effectiveStreak, migrateSessionNotes, dropCorruptedSessions,
 } from "./helpers.js";
 import { SessionRow, GroupedSessionList } from "./SessionViews.jsx";
 import { StoryGate, StoryHistoryModal } from "./ComebackStory.jsx";
@@ -149,7 +149,7 @@ export default function App() {
         setData({
           ...merged,
           sessions: migrateSessionNotes(
-            (local.sessions || []).map(s => sanitizeSession({ ...s, date: dateKey(s.start) })),
+            dropCorruptedSessions(local.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
             merged.logs,
           ),
         });
@@ -185,7 +185,7 @@ export default function App() {
         const migrated = {
           ...merged,
           sessions: migrateSessionNotes(
-            (chosen.sessions || []).map(s => sanitizeSession({ ...s, date: dateKey(s.start) })),
+            dropCorruptedSessions(chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
             merged.logs,
           ),
         };
@@ -248,7 +248,7 @@ export default function App() {
       const migrated = {
         ...merged,
         sessions: migrateSessionNotes(
-          (chosen.sessions || []).map(s => sanitizeSession({ ...s, date: dateKey(s.start) })),
+          dropCorruptedSessions(chosen.sessions || []).map(s => ({ ...s, date: dateKey(s.start) })),
           merged.logs,
         ),
       };
