@@ -262,24 +262,6 @@ export default function App() {
     return unsub;
   }, [user]);
 
-  // If a timer is already running locally by the time auth finishes
-  // resolving (started in the first instant after opening the app, before
-  // login had a chance to complete — or resumed from localStorage on this
-  // same device), toggleLog's own push either hadn't fired yet (user was
-  // still null) or fired before we had a uid to push with. Push it now, once,
-  // so the cloud reflects it instead of staying stale.
-  const pushedOnLoginRef = useRef(false);
-  useEffect(() => {
-    if (!user) { pushedOnLoginRef.current = false; return; }
-    if (pushedOnLoginRef.current) return;
-    pushedOnLoginRef.current = true;
-    if (activeTimer) {
-      const pushedAt = Date.now();
-      lastPushedTimerAtRef.current = pushedAt;
-      setCloudActiveTimer(user.uid, activeTimer, pushedAt).catch(() => {});
-    }
-  }, [user]);
-
   // The currently-running timer (if any) is mirrored live across devices —
   // so if you start "Study" on your PC, your phone shows it running too,
   // in real time, without needing to stop it first.
