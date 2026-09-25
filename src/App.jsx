@@ -732,26 +732,34 @@ export default function App() {
         onDismiss={() => dismissStreakRestore(restoreModalLog.id)}
         onClose={() => setRestoreModalLogId(null)}
       />
-      <Modal open={lastLoggedPopupOpen} onClose={() => setLastLoggedPopupOpen(false)} title="Last logged">
-        {lastLoggedSession && (
-          <div className="text-sm text-gray-200 space-y-2">
-            <div className="text-base font-semibold text-gray-100">{lastLoggedSession.logName}</div>
-            <div className="text-gray-400">{fmtAgo(lastLoggedSession.session.end, now)}</div>
-            <div className="flex justify-between pt-2 border-t border-neutral-800">
-              <span className="text-gray-400">Duration</span>
-              <span className="font-medium">{fmtHM(lastLoggedSession.session.duration)}</span>
+      {lastLoggedPopupOpen && lastLoggedSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-6" onClick={() => setLastLoggedPopupOpen(false)}>
+          <div className="bg-neutral-900 w-full max-w-sm rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-semibold text-gray-100">Last logged</h3>
+              <button onClick={() => setLastLoggedPopupOpen(false)} className="p-1 rounded-full hover:bg-neutral-800"><X size={18} /></button>
             </div>
-            <div className="flex justify-between">
-              <span className="text-gray-400">Time range</span>
-              <span className="font-medium">{fmtClock(lastLoggedSession.session.start)} – {fmtClock(lastLoggedSession.session.end)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-400">Date</span>
-              <span className="font-medium">{lastLoggedSession.session.date}</span>
+            <div className="text-sm text-gray-200 space-y-2">
+              <div className="text-base font-semibold text-gray-100">{lastLoggedSession.logName}</div>
+              <div className="text-gray-400">{fmtAgo(lastLoggedSession.session.end, now)}</div>
+              <div className="flex justify-between pt-2 border-t border-neutral-800">
+                <span className="text-gray-400">Duration</span>
+                {/* fmtHMS, not fmtHM — fmtHM rounds to whole minutes, which
+                    shows "0:00" for any session under a minute (e.g. 13s). */}
+                <span className="font-medium">{fmtHMS(lastLoggedSession.session.duration)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Time range</span>
+                <span className="font-medium">{fmtClock(lastLoggedSession.session.start)} – {fmtClock(lastLoggedSession.session.end)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Date</span>
+                <span className="font-medium">{lastLoggedSession.session.date}</span>
+              </div>
             </div>
           </div>
-        )}
-      </Modal>
+        </div>
+      )}
       {/* Comeback story feature disabled for now — flip back on by uncommenting.
       <StoryGate data={data} scheduleSave={scheduleSave} now={now} /> */}
       {/* <StoryHistoryModal open={storyHistoryOpen} onClose={() => setStoryHistoryOpen(false)} story={data.story} /> */}
