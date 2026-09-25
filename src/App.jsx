@@ -262,21 +262,47 @@ export default function App() {
     return unsub;
   }, [user]);
 
+  // If a timer is already running locally by the time auth finishes
+  // resolving (started in the first instant after opening the app, before
+  // login had a chance to complete — or resumed from localStorage on this
+  // same device), toggleLog's own push either hadn't fired yet (user was
+  // still null) or fired before we had a uid to push with. Push it now, once,
+  // so the cloud reflects it instead of staying stale.
+  const pushedOnLoginRef = useRef(false);
+  useEffect(() => {
+    if (!user) { pushedOnLoginRef.current = false; return; }
+    if (pushedOnLoginRef.current) return;
+    pushedOnLoginRef.current = true;
+    if (activeTimer) {
+      const pushedAt = Date.now();
+      lastPushedTimerAtRef.current = pushedAt;
+      setCloudActiveTimer(user.uid, activeTimer, pushedAt).catch(() => {});
+    }
+  }, [user]);
+
   // The currently-running timer (if any) is mirrored live across devices —
   // so if you start "Study" on your PC, your phone shows it running too,
   // in real time, without needing to stop it first.
   useEffect(() => {
     if (!user) return;
     const unsub = watchCloudActiveTimer(user.uid, (remote, remoteUpdatedAt) => {
-      // A snapshot older than the last start/stop we pushed ourselves is
-      // stale — most commonly the very first snapshot this listener gets
-      // right after connecting, which can carry the pre-start value from
-      // before we opened the app. Applying it would silently kill a timer
-      // we just started. A genuinely newer remote change (e.g. you started
-      // or stopped it from another device) always has a newer timestamp
-      // and still comes through normally.
-      if ((remoteUpdatedAt || 0) < lastPushedTimerAtRef.current) return;
       setActiveTimer((current) => {
+        // A snapshot older than either (a) the last start/stop we pushed
+        // ourselves, or (b) the local timer already running right now, is
+        // stale and must be ignored — most commonly the very first snapshot
+        // this listener gets right after connecting, which can carry the
+        // pre-start value from before we opened the app. We check the local
+        // activeTimer's own startedAt too (not just the push-tracking ref)
+        // because if the timer was started before auth had even finished
+        // resolving, toggleLog's cloud push never fired yet (user was still
+        // null), so there'd be nothing in lastPushedTimerAtRef to compare
+        // against — but the running local timer's startedAt is still a
+        // reliable, always-set marker of "something more recent happened
+        // here than whatever this snapshot is reporting". A genuinely newer
+        // remote change (started or stopped from another device) still has
+        // a newer timestamp than both and comes through normally.
+        const localFloor = Math.max(lastPushedTimerAtRef.current, current?.startedAt || 0);
+        if ((remoteUpdatedAt || 0) < localFloor) return current;
         if (JSON.stringify(current) === JSON.stringify(remote)) return current;
         return remote;
       });
