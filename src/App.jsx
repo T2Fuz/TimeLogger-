@@ -9,7 +9,7 @@ import { logout, watchAuth, signUpWithUsername, signInWithUsername, loadCloudDat
 import {
   STORAGE_KEY, ACTIVE_TIMER_KEY, COLORS,
   hslToHex, satOf, hueOf, hsbToHex, hexToHsb, isValidHex, rootLogId, uid, pad,
-  fmtHMS, fmtHM, updateAppSettings, fmtClock, fmtAMPM, dateKey, logicalMinutes,
+  fmtHMS, fmtHM, fmtAgo, updateAppSettings, fmtClock, fmtAMPM, dateKey, logicalMinutes,
   minutesToClock, todayKey, addDays, startOfWeek, weekdayIdx,
   WEEKDAYS, WEEKDAYS_SHORT3, MONTHS, MONTHS_LONG, fmtLongDate, defaultData, computeStreak,
   applySessionEffects, detectBrokenStreak, RESTORE_XP_COST, effectiveStreak, migrateSessionNotes, sanitizeSession,
@@ -86,6 +86,8 @@ export default function App() {
   useEffect(() => { dataRef.current = data; }, [data]);
 
   const [loaded, setLoaded] = useState(false);
+  const [lastLoggedPopupOpen, setLastLoggedPopupOpen] = useState(false);
+  const lastLoggedPopupShownRef = useRef(false); // only pop up once per app open
   const [activeTimer, setActiveTimer] = useState(() => {
     try {
       const raw = localStorage.getItem(ACTIVE_TIMER_KEY);
@@ -237,6 +239,16 @@ export default function App() {
       } catch (e) { setSyncing(false); /* will retry on next save, or Firestore's own offline queue handles it */ }
     }
   }
+
+  // Pop up a one-time "last logged" summary once the app has finished its
+  // initial load (local data, then cloud data if signed in) — not before,
+  // or it would flash the wrong (empty/stale) info. Only once per app open.
+  useEffect(() => {
+    if (!loaded || lastLoggedPopupShownRef.current) return;
+    lastLoggedPopupShownRef.current = true;
+    const sessions = dataRef.current.sessions || [];
+    if (sessions.length > 0) setLastLoggedPopupOpen(true);
+  }, [loaded]);
 
   // ---------- live cross-device sync ----------
   // Besides the load-once-on-login above, keep listening: if the data
@@ -571,6 +583,16 @@ export default function App() {
   }, [todaySessions, activeTimer, now, tKey]);
   const currentFocus = activeTimer ? Math.floor((now - activeTimer.startedAt) / 1000) : 0;
 
+  // Most recent session across every log, for the one-time "last logged"
+  // popup — recomputed only when sessions actually change.
+  const lastLoggedSession = useMemo(() => {
+    const sessions = data.sessions || [];
+    if (sessions.length === 0) return null;
+    const s = sessions.reduce((latest, cur) => (cur.end > latest.end ? cur : latest), sessions[0]);
+    const log = data.logs.find(l => l.id === s.logId);
+    return { session: s, logName: log ? log.name : "Deleted log" };
+  }, [data.sessions, data.logs]);
+
   function logTodayTotal(logId) {
     const childIds = data.logs.filter(l => l.parentId === logId).map(l => l.id);
     const ids = [logId, ...childIds];
@@ -710,6 +732,26 @@ export default function App() {
         onDismiss={() => dismissStreakRestore(restoreModalLog.id)}
         onClose={() => setRestoreModalLogId(null)}
       />
+      <Modal open={lastLoggedPopupOpen} onClose={() => setLastLoggedPopupOpen(false)} title="Last logged">
+        {lastLoggedSession && (
+          <div className="text-sm text-gray-200 space-y-2">
+            <div className="text-base font-semibold text-gray-100">{lastLoggedSession.logName}</div>
+            <div className="text-gray-400">{fmtAgo(lastLoggedSession.session.end, now)}</div>
+            <div className="flex justify-between pt-2 border-t border-neutral-800">
+              <span className="text-gray-400">Duration</span>
+              <span className="font-medium">{fmtHM(lastLoggedSession.session.duration)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-400">Time range</span>
+              <span className="font-medium">{fmtClock(lastLoggedSession.session.start)} – {fmtClock(lastLoggedSession.session.end)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-400">Date</span>
+              <span className="font-medium">{lastLoggedSession.session.date}</span>
+            </div>
+          </div>
+        )}
+      </Modal>
       {/* Comeback story feature disabled for now — flip back on by uncommenting.
       <StoryGate data={data} scheduleSave={scheduleSave} now={now} /> */}
       {/* <StoryHistoryModal open={storyHistoryOpen} onClose={() => setStoryHistoryOpen(false)} story={data.story} /> */}
@@ -1018,6 +1060,8 @@ function HomeScreen(props) {
 
   const topLevelLogs = data.logs.filter(l => !l.parentId && !l.archived);
   const subLogParent = data.logs.find(l => l.id === subLogParentId);
+
+
 
   return (
     <div>

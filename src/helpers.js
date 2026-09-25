@@ -76,6 +76,18 @@ export function fmtHMS(totalSeconds) {
   const s = Math.max(0, Math.floor(totalSeconds || 0));
   return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
+// "Just now" / "5m ago" / "3h ago" / "2d ago" style relative-time label,
+// used for the "last logged" indicator on the Home screen.
+export function fmtAgo(fromTs, nowTs) {
+  const diffSec = Math.max(0, Math.floor(((nowTs ?? Date.now()) - fromTs) / 1000));
+  if (diffSec < 60) return "just now";
+  const mins = Math.floor(diffSec / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 export function fmtHM(totalSeconds) {
   const s = Math.max(0, Math.floor(totalSeconds || 0));
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
