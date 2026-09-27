@@ -88,6 +88,40 @@ export function fmtAgo(fromTs, nowTs) {
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
 }
+// Union two lists of records (logs, sessions, todos, planner items) by `id`,
+// instead of ever replacing one whole list with the other. This is what
+// makes reconciling "local" vs "cloud" safe: even if the wrong side gets
+// picked as the "newer" one by their overall updatedAt timestamp (which can
+// happen — e.g. a stale local copy that just got a fresh save-timestamp
+// stamped on it), an item that exists ONLY on one side never gets silently
+// dropped. When the same id exists on both sides, `preferred`'s copy of that
+// record wins (it's the side whose updatedAt was newer).
+function mergeListsById(baseList, preferredList) {
+  const map = new Map();
+  for (const item of (baseList || [])) if (item && item.id != null) map.set(item.id, item);
+  for (const item of (preferredList || [])) if (item && item.id != null) map.set(item.id, item);
+  return Array.from(map.values());
+}
+
+// Merge two full data snapshots (as stored: {logs, sessions, todos, planner,
+// dday, settings, ...}). `preferred` is the one whose overall updatedAt was
+// newer — its settings/dday/etc win outright (there's only ever one of
+// those), but its logs/sessions/todos/planner are UNIONED with `base`'s
+// rather than replacing them, so nothing that only exists on the older side
+// gets lost.
+export function mergeDataSnapshots(base, preferred) {
+  if (!base) return preferred;
+  if (!preferred) return base;
+  return {
+    ...base,
+    ...preferred,
+    logs: mergeListsById(base.logs, preferred.logs),
+    sessions: mergeListsById(base.sessions, preferred.sessions),
+    todos: mergeListsById(base.todos, preferred.todos),
+    planner: mergeListsById(base.planner, preferred.planner),
+  };
+}
+
 export function fmtHM(totalSeconds) {
   const s = Math.max(0, Math.floor(totalSeconds || 0));
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);

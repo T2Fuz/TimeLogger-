@@ -13,6 +13,7 @@ import {
   minutesToClock, todayKey, addDays, startOfWeek, weekdayIdx,
   WEEKDAYS, WEEKDAYS_SHORT3, MONTHS, MONTHS_LONG, fmtLongDate, defaultData, computeStreak,
   applySessionEffects, detectBrokenStreak, RESTORE_XP_COST, effectiveStreak, migrateSessionNotes, sanitizeSession,
+  mergeDataSnapshots,
 } from "./helpers.js";
 import { SessionRow, GroupedSessionList } from "./SessionViews.jsx";
 import { StoryGate, StoryHistoryModal } from "./ComebackStory.jsx";
@@ -182,11 +183,20 @@ export default function App() {
         try { cloud = await loadCloudData(user.uid); } catch (e) { /* offline, that's fine */ }
       }
 
-      // Pick whichever copy was actually saved more recently — a device
-      // that's been offline (or a reload that raced the debounced cloud
-      // write) shouldn't have its newer local data clobbered by an older
-      // cloud snapshot just because a cloud copy exists at all.
-      const chosen = (cloud && (cloud.updatedAt || 0) >= (local?.updatedAt || 0)) ? cloud : local;
+      // Pick whichever copy was actually saved more recently as the
+      // "preferred" side for settings/dday/etc — but UNION logs/sessions/
+      // todos/planner from both sides by id rather than replacing one whole
+      // snapshot with the other. This is what protects against the case
+      // where a stale local copy (e.g. this tab got reloaded — a background
+      // tab discarded by the browser, or a reload that raced the debounced
+      // cloud write) ends up looking "newer" by timestamp than it should:
+      // even then, any session/log that only exists on the OTHER side is
+      // still kept, instead of silently vanishing when the stale side wins
+      // the timestamp comparison and gets pushed up to the cloud.
+      const localNewer = (local?.updatedAt || 0) > (cloud?.updatedAt || 0);
+      const preferred = localNewer ? local : cloud;
+      const other = localNewer ? cloud : local;
+      const chosen = mergeDataSnapshots(other, preferred);
       if (chosen) {
         const merged = { ...defaultData(), ...chosen };
         const migrated = {
@@ -197,12 +207,10 @@ export default function App() {
           ),
         };
         setData(migrated);
-        // If local turned out to be the newer copy (this device had data the
-        // cloud didn't have yet, or a save never made it up before a reload),
-        // push it up right away — don't wait for the next log entry.
-        if (user && chosen === local) {
-          persist(migrated);
-        }
+        // Push the merged (possibly superset) result back up whenever we're
+        // logged in — not just when local "won" — since the merge can add
+        // local-only records on top of cloud even when cloud was preferred.
+        if (user) persist(migrated);
       }
       setLoaded(true);
     })();
@@ -269,7 +277,11 @@ export default function App() {
           merged.logs,
         ),
       };
-      setData(migrated);
+      // Union with whatever's currently in memory rather than replacing it
+      // outright — protects a local change that was just made (e.g. a
+      // session added a moment ago, still sitting in the 350ms save debounce)
+      // from being wiped out by an incoming remote update that predates it.
+      setData((current) => mergeDataSnapshots(current, migrated));
     });
     return unsub;
   }, [user]);
