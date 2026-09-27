@@ -84,9 +84,13 @@ export function fmtAgo(fromTs, nowTs) {
   const mins = Math.floor(diffSec / 60);
   if (mins < 60) return `${mins}m ago`;
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) {
+    const remMins = mins % 60;
+    return remMins > 0 ? `${hours}h ${remMins}m ago` : `${hours}h ago`;
+  }
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  const remHours = hours % 24;
+  return remHours > 0 ? `${days}d ${remHours}h ago` : `${days}d ago`;
 }
 // Union two lists of records (logs, sessions, todos, planner items) by `id`,
 // instead of ever replacing one whole list with the other. This is what
