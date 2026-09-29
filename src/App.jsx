@@ -240,9 +240,27 @@ export default function App() {
     if (user) {
       try {
         setSyncing(true);
+        // Read the server's current copy right before writing, and union it
+        // with our own change (ours wins for anything with the same id —
+        // it's the freshest, most intentional edit) rather than blindly
+        // overwriting. This is the real safety net for a device whose live
+        // listener has gone stale (a long-open tab, a backgrounded tab, a
+        // missed reconnect): every save self-heals by re-checking the
+        // server instead of trusting only what this device has seen so far.
+        let base = next;
+        try {
+          const serverNow = await loadCloudData(user.uid);
+          if (serverNow) base = mergeDataSnapshots(serverNow, next);
+        } catch (e) { /* couldn't read the server copy — fall back to writing our own, as before */ }
         const savedAt = Date.now();
-        await saveCloudData(user.uid, next); // Firestore queues this offline and sends it once online
+        await saveCloudData(user.uid, base); // Firestore queues this offline and sends it once online
         lastSavedAtRef.current = savedAt;
+        if (base !== next) {
+          // The server had records we didn't have locally — pull them in now
+          // instead of waiting for the live listener to eventually catch up.
+          setData(base);
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(base)); } catch (e) {}
+        }
         setSyncing(false);
       } catch (e) { setSyncing(false); /* will retry on next save, or Firestore's own offline queue handles it */ }
     }
