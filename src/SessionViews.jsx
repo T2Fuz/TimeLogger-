@@ -70,7 +70,11 @@ export function SessionRow({ session, data, scheduleSave, dateKey }) {
     setEditing(false);
   }
   function remove() {
-    scheduleSave({ ...data, sessions: data.sessions.filter(x => x.id !== session.id) });
+    scheduleSave({
+      ...data,
+      sessions: data.sessions.filter(x => x.id !== session.id),
+      deletedIds: [...(data.deletedIds || []), session.id],
+    });
   }
 
   if (editing) {

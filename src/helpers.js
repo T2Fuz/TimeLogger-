@@ -100,10 +100,11 @@ export function fmtAgo(fromTs, nowTs) {
 // stamped on it), an item that exists ONLY on one side never gets silently
 // dropped. When the same id exists on both sides, `preferred`'s copy of that
 // record wins (it's the side whose updatedAt was newer).
-function mergeListsById(baseList, preferredList) {
+function mergeListsById(baseList, preferredList, deletedIds) {
   const map = new Map();
   for (const item of (baseList || [])) if (item && item.id != null) map.set(item.id, item);
   for (const item of (preferredList || [])) if (item && item.id != null) map.set(item.id, item);
+  if (deletedIds && deletedIds.size) for (const id of deletedIds) map.delete(id);
   return Array.from(map.values());
 }
 
@@ -116,13 +117,15 @@ function mergeListsById(baseList, preferredList) {
 export function mergeDataSnapshots(base, preferred) {
   if (!base) return preferred;
   if (!preferred) return base;
+  const deletedIds = new Set([...(base.deletedIds || []), ...(preferred.deletedIds || [])]);
   return {
     ...base,
     ...preferred,
-    logs: mergeListsById(base.logs, preferred.logs),
-    sessions: mergeListsById(base.sessions, preferred.sessions),
-    todos: mergeListsById(base.todos, preferred.todos),
-    planner: mergeListsById(base.planner, preferred.planner),
+    deletedIds: Array.from(deletedIds),
+    logs: mergeListsById(base.logs, preferred.logs, deletedIds),
+    sessions: mergeListsById(base.sessions, preferred.sessions, deletedIds),
+    todos: mergeListsById(base.todos, preferred.todos, deletedIds),
+    planner: mergeListsById(base.planner, preferred.planner, deletedIds),
   };
 }
 
@@ -257,6 +260,16 @@ export const MONTHS_LONG = ["January","February","March","April","May","June","J
 export function defaultData() {
   return {
     logs: [], sessions: [], todos: [], planner: [], dday: { label: "D-DAY", date: null },
+    // Tombstones: ids of records explicitly deleted by the user (hard
+    // deletes — session entries, todos, planner items). The cloud-merge
+    // logic unions records by id from two snapshots, which on its own can
+    // never represent "this was removed" — without this list, a deleted
+    // record kept quietly reappearing because the merge saw it still
+    // sitting in whichever copy hadn't gotten the delete yet and added it
+    // right back in. mergeDataSnapshots unions this list too and filters
+    // anything in it out of the merged result, so a delete sticks no matter
+    // which side's copy is stale.
+    deletedIds: [],
     settings: { timeFormat: "24h", dayResetHour: 3, storyHour: 8, storyMinute: 0 },
     // Comeback-story feature: lastShownDate is the plain calendar date (not the
     // logical/reset-hour day) the story was last completed on. pendingDate is

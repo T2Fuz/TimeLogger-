@@ -233,7 +233,7 @@ export default function App() {
     saveTimer.current = setTimeout(() => persist(stamped), 350);
     return stamped;
   }
-  async function persist(next) {
+  async function persist(next, { force = false } = {}) {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     } catch (e) { /* local write failed; data still lives in memory/state */ }
@@ -247,11 +247,17 @@ export default function App() {
         // listener has gone stale (a long-open tab, a backgrounded tab, a
         // missed reconnect): every save self-heals by re-checking the
         // server instead of trusting only what this device has seen so far.
+        // Import is the one deliberate exception (force=true): the whole
+        // point of importing a backup is to replace whatever's currently
+        // out there — including bad data it's meant to fix — so it must
+        // skip this merge, or it could merge the very corruption back in.
         let base = next;
-        try {
-          const serverNow = await loadCloudData(user.uid);
-          if (serverNow) base = mergeDataSnapshots(serverNow, next);
-        } catch (e) { /* couldn't read the server copy — fall back to writing our own, as before */ }
+        if (!force) {
+          try {
+            const serverNow = await loadCloudData(user.uid);
+            if (serverNow) base = mergeDataSnapshots(serverNow, next);
+          } catch (e) { /* couldn't read the server copy — fall back to writing our own, as before */ }
+        }
         const savedAt = Date.now();
         await saveCloudData(user.uid, base); // Firestore queues this offline and sends it once online
         lastSavedAtRef.current = savedAt;
@@ -654,7 +660,7 @@ export default function App() {
         // right after importing could otherwise race and lose.
         const stamped = scheduleSave({ ...defaultData(), ...parsed });
         if (saveTimer.current) clearTimeout(saveTimer.current);
-        persist(stamped);
+        persist(stamped, { force: true });
       } catch (err) {}
     };
     reader.readAsText(file);
@@ -1338,7 +1344,9 @@ function PlannerPanel({ data, scheduleSave }) {
     scheduleSave({ ...data, planner: [...data.planner, { id: uid(), date, time, title: title.trim() }] });
     setTitle("");
   }
-  function removeItem(id) { scheduleSave({ ...data, planner: data.planner.filter(p => p.id !== id) }); }
+  function removeItem(id) {
+    scheduleSave({ ...data, planner: data.planner.filter(p => p.id !== id), deletedIds: [...(data.deletedIds || []), id] });
+  }
 
   return (
     <div className="p-4">
@@ -1379,7 +1387,9 @@ function TodoScreen({ data, scheduleSave }) {
     setText(""); setDueDate("");
   }
   function toggle(id) { scheduleSave({ ...data, todos: data.todos.map(t => t.id === id ? { ...t, done: !t.done } : t) }); }
-  function remove(id) { scheduleSave({ ...data, todos: data.todos.filter(t => t.id !== id) }); }
+  function remove(id) {
+    scheduleSave({ ...data, todos: data.todos.filter(t => t.id !== id), deletedIds: [...(data.deletedIds || []), id] });
+  }
 
   const pending = data.todos.filter(t => !t.done);
   const done = data.todos.filter(t => t.done);
