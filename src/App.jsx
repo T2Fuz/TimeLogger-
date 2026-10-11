@@ -39,14 +39,23 @@ function Modal({ open, onClose, title, children }) {
   );
 }
 
-function TopSyncBar({ isOnline, onExport, onImport, user, syncing, setSkippedLogin }) {
+function TopSyncBar({ isOnline, onExport, onImport, user, syncing, syncPct, setSkippedLogin }) {
   const fileRef = useRef(null);
+  const showProg = isOnline && syncing;
+  const pct = Math.max(0, Math.min(100, Math.round(syncPct || 0)));
   return (
     <div className="flex items-center gap-2">
-      <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-white/20 text-white">
-        {isOnline ? <Cloud size={13} /> : <CloudOff size={13} />}
-        {!isOnline ? "Offline" : syncing ? "Syncing…" : user ? "Synced" : "Online"}
-      </span>
+      <div className="flex flex-col">
+        <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-white/20 text-white tabular-nums">
+          {isOnline ? <Cloud size={13} /> : <CloudOff size={13} />}
+          {!isOnline ? "Offline" : syncing ? `Syncing ${pct}%` : user ? "Synced" : "Online"}
+        </span>
+        {showProg && (
+          <div className="mt-0.5 h-[2px] w-full rounded-full bg-white/25 overflow-hidden" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: "#22c55e", transition: "width 250ms ease-out" }} />
+          </div>
+        )}
+      </div>
       <button onClick={onExport} title="Export backup" className="p-1.5 rounded-full bg-white/20 text-white"><Download size={14} /></button>
       <button onClick={() => fileRef.current?.click()} title="Import backup" className="p-1.5 rounded-full bg-white/20 text-white"><Upload size={14} /></button>
       <input ref={fileRef} type="file" accept="application/json" className="hidden" onChange={onImport} />
@@ -112,6 +121,28 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   const [user, setUser] = useState(undefined); // undefined = still checking, null = logged out
   const [syncing, setSyncing] = useState(false);
+  const [syncPct, setSyncPct] = useState(0); // real milestones of the current sync, 0-100
+  const syncHideRef = useRef(null);
+  const syncFailsafeRef = useRef(null);
+  const syncDepthRef = useRef(0); // overlapping syncs share one bar
+  function syncStep(pct) { setSyncPct(p => Math.max(p, pct)); }
+  function syncBegin() {
+    if (syncHideRef.current) { clearTimeout(syncHideRef.current); syncHideRef.current = null; }
+    if (syncDepthRef.current === 0) setSyncPct(0);
+    syncDepthRef.current++;
+    setSyncing(true);
+    // safety net: never leave the bar stuck if something throws mid-sync
+    if (syncFailsafeRef.current) clearTimeout(syncFailsafeRef.current);
+    syncFailsafeRef.current = setTimeout(() => { syncDepthRef.current = 0; setSyncing(false); setSyncPct(0); }, 45000);
+  }
+  function syncEnd(ok) {
+    syncDepthRef.current = Math.max(0, syncDepthRef.current - 1);
+    if (syncDepthRef.current > 0) return;
+    if (syncFailsafeRef.current) { clearTimeout(syncFailsafeRef.current); syncFailsafeRef.current = null; }
+    if (ok) setSyncPct(100);
+    // let the bar visibly reach 100% before it disappears
+    syncHideRef.current = setTimeout(() => { setSyncing(false); setSyncPct(0); syncHideRef.current = null; }, ok ? 500 : 0);
+  }
   const [skippedLogin, setSkippedLogin] = useState(false);
   const [authUsername, setAuthUsername] = useState("");
   const [authPass, setAuthPass] = useState("");
@@ -182,7 +213,10 @@ export default function App() {
 
       let cloud = null;
       if (user) {
+        syncBegin();
+        syncStep(10);
         try { cloud = await loadCloudData(user.uid); } catch (e) { /* offline, that's fine */ }
+        syncStep(35);
       }
 
       // Pick whichever copy was actually saved more recently as the
@@ -217,6 +251,7 @@ export default function App() {
       }
       setLoaded(true);
       setCloudChecked(true);
+      if (user) syncEnd(true);
     })();
   }, [user]);
 
@@ -243,7 +278,8 @@ export default function App() {
     } catch (e) { /* local write failed; data still lives in memory/state */ }
     if (user) {
       try {
-        setSyncing(true);
+        syncBegin();
+        syncStep(5);
         // Read the server's current copy right before writing, and union it
         // with our own change (ours wins for anything with the same id —
         // it's the freshest, most intentional edit) rather than blindly
@@ -259,10 +295,13 @@ export default function App() {
         if (!force) {
           try {
             const serverNow = await loadCloudData(user.uid);
+            syncStep(40);
             if (serverNow) base = mergeDataSnapshots(serverNow, next);
+            syncStep(55);
           } catch (e) { /* couldn't read the server copy — fall back to writing our own, as before */ }
         }
         const savedAt = Date.now();
+        syncStep(60);
         await saveCloudData(user.uid, base); // Firestore queues this offline and sends it once online
         lastSavedAtRef.current = savedAt;
         if (base !== next) {
@@ -271,8 +310,8 @@ export default function App() {
           setData(base);
           try { localStorage.setItem(STORAGE_KEY, JSON.stringify(base)); } catch (e) {}
         }
-        setSyncing(false);
-      } catch (e) { setSyncing(false); /* will retry on next save, or Firestore's own offline queue handles it */ }
+        syncEnd(true);
+      } catch (e) { syncEnd(false); /* will retry on next save, or Firestore's own offline queue handles it */ }
     }
   }
 
@@ -755,7 +794,7 @@ export default function App() {
           subLogOpen={subLogOpen} setSubLogOpen={setSubLogOpen}
           subLogParentId={subLogParentId} setSubLogParentId={setSubLogParentId}
           subLogName={subLogName} setSubLogName={setSubLogName}
-          isOnline={isOnline} user={user} syncing={syncing} setSkippedLogin={setSkippedLogin}
+          isOnline={isOnline} user={user} syncing={syncing} syncPct={syncPct} setSkippedLogin={setSkippedLogin}
           settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen}
           onOpenRestore={setRestoreModalLogId}
           setStoryHistoryOpen={setStoryHistoryOpen}
@@ -1103,7 +1142,7 @@ function HomeScreen(props) {
     logMenuId, setLogMenuId, renameId, setRenameId, renameVal, setRenameVal, renameLog, deleteLog, moveLog,
     colorPickerId, setColorPickerId, setLogColor, setLogColorLive, setLogParent, setLogNote, setLogStreakGoal,
     expandedId, setExpandedId, subLogOpen, setSubLogOpen, subLogParentId, setSubLogParentId, subLogName, setSubLogName,
-    isOnline, user, syncing, setSkippedLogin, settingsOpen, setSettingsOpen, onExport, onImport,
+    isOnline, user, syncing, syncPct, setSkippedLogin, settingsOpen, setSettingsOpen, onExport, onImport,
     manualOpen, setManualOpen, manualLogId, setManualLogId, manualDate, setManualDate,
     manualMode, setManualMode, manualStart, setManualStart, manualEnd, setManualEnd,
     manualH, setManualH, manualM, setManualM, addManualSession,
@@ -1119,7 +1158,7 @@ function HomeScreen(props) {
     <div>
       <div className="rounded-b-3xl px-5 pt-5 pb-6 text-white" style={{ background: "linear-gradient(135deg,#FF8A2A,#FF6B00)" }}>
         <div className="flex items-center justify-end mb-4 gap-2">
-          <TopSyncBar isOnline={isOnline} onExport={onExport} onImport={onImport} user={user} syncing={syncing} setSkippedLogin={setSkippedLogin} />
+          <TopSyncBar isOnline={isOnline} onExport={onExport} onImport={onImport} user={user} syncing={syncing} syncPct={syncPct} setSkippedLogin={setSkippedLogin} />
           <button onClick={() => setSettingsOpen(true)} title="Settings" className="p-1.5 rounded-full bg-white/20 text-white"><SettingsIcon size={14} /></button>
         </div>
         <div className="flex items-stretch gap-3">
