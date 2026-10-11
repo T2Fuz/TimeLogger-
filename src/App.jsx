@@ -87,6 +87,7 @@ export default function App() {
   useEffect(() => { dataRef.current = data; }, [data]);
 
   const [loaded, setLoaded] = useState(false);
+  const [cloudChecked, setCloudChecked] = useState(false); // cloud copy merged in (or unavailable)
   const [lastLoggedPopupOpen, setLastLoggedPopupOpen] = useState(false);
   const lastLoggedPopupShownRef = useRef(false); // only pop up once per app open
   const [activeTimer, setActiveTimer] = useState(() => {
@@ -154,6 +155,7 @@ export default function App() {
       if (raw) {
         const local = JSON.parse(raw);
         const merged = { ...defaultData(), ...local };
+        updateAppSettings(merged.settings); // day-reset hour must be known BEFORE dates are derived
         setData({
           ...merged,
           sessions: migrateSessionNotes(
@@ -199,6 +201,7 @@ export default function App() {
       const chosen = mergeDataSnapshots(other, preferred);
       if (chosen) {
         const merged = { ...defaultData(), ...chosen };
+        updateAppSettings(merged.settings);
         const migrated = {
           ...merged,
           sessions: migrateSessionNotes(
@@ -213,6 +216,7 @@ export default function App() {
         if (user) persist(migrated);
       }
       setLoaded(true);
+      setCloudChecked(true);
     })();
   }, [user]);
 
@@ -294,6 +298,7 @@ export default function App() {
       const chosen = doc.payload;
       if (!chosen) return;
       const merged = { ...defaultData(), ...chosen };
+      updateAppSettings(merged.settings);
       const migrated = {
         ...merged,
         sessions: migrateSessionNotes(
@@ -363,6 +368,9 @@ export default function App() {
   // broke yesterday, and flags it (log.brokenStreak) so the restore modal
   // can offer to fix it. Cheap no-op once a day per log once already checked.
   useEffect(() => {
+    // Never judge "did yesterday hit the goal" from half-loaded data: wait
+    // until the cloud copy has been merged in (or the check has failed/offline).
+    if (!cloudChecked) return;
     const cur = dataRef.current;
     let changed = false;
     const logs = cur.logs.map(l => {
@@ -387,7 +395,7 @@ export default function App() {
       return next;
     });
     if (changed) scheduleSave({ ...cur, logs });
-  }, [now]);
+  }, [now, cloudChecked]);
 
   const [restoreModalLogId, setRestoreModalLogId] = useState(null);
   const restoreModalLog = data.logs.find(l => l.id === restoreModalLogId) || null;

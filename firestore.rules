@@ -6,6 +6,20 @@ service cloud.firestore {
       match /meta/{docId} {
         allow read, write: if request.auth != null && request.auth.uid == uid;
       }
+      // Journal: sections, pages, page bodies and media. Each person can only
+      // ever read/write their own.
+      match /journalSections/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+      match /journalPages/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+      match /journalContent/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+      match /journalMedia/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
     }
   }
 }

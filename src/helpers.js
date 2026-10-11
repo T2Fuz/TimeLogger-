@@ -421,7 +421,19 @@ export function applySessionEffects(data, session) {
 // missed days themselves are never counted, only skipped over.
 export function detectBrokenStreak(log, sessions, now) {
   if (!log.streakGoalSec) return log;
-  if (log.brokenStreak) return log; // already flagged, waiting on the user
+  if (log.brokenStreak) {
+    // Self-heal: a break flagged from incomplete data (e.g. the check ran
+    // before another device's sessions had synced in) must not stick around.
+    // If any day we called "missed" actually hits the goal now, the flag was
+    // wrong — drop it (and any catch-up it spawned) so nothing is charged.
+    const tot = {};
+    sessions.forEach(s => { if (s.logId === log.id) tot[s.date] = (tot[s.date] || 0) + s.duration; });
+    const dates = log.brokenStreak.dates || [];
+    if (dates.some(k => (tot[k] || 0) >= log.streakGoalSec)) {
+      return { ...log, brokenStreak: null, catchUpTarget: null, lastBrokenCheck: null };
+    }
+    return log; // genuinely broken, waiting on the user
+  }
   const yesterday = addDays(now, -1);
   const yKey = dateKey(yesterday);
   if (log.lastBrokenCheck === yKey) return log; // already checked this day, nothing new
